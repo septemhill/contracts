@@ -2,9 +2,12 @@ import {
   time,
   loadFixture,
 } from "@nomicfoundation/hardhat-toolbox-viem/network-helpers";
-import { expect } from "chai";
+import chai, { expect } from "chai";
 import hre from "hardhat";
 import { getAddress, parseGwei } from "viem";
+import chaiAsPromised from "chai-as-promised";
+
+chai.use(chaiAsPromised);
 
 describe("Lock", function () {
   // We define a fixture to reuse the same setup in every test.
