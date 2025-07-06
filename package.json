@@ -1,5 +1,13 @@
 {
   "name": "hardhat-project",
+  "scripts": {
+    "compile": "hardhat compile",
+    "node": "hardhat node",
+    "deploy:p2p:localhost": "hardhat ignition deploy ignition/modules/P2PExchange.ts --network localhost",
+    "deploy:lock:localhost": "hardhat ignition deploy ignition/modules/Lock.ts --network localhost",
+    "deploy:p2p-and-tokens:localhost": "hardhat ignition deploy ignition/modules/DeployP2PAndTokens.ts --network localhost",
+    "test": "forge test && hardhat test"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",
     "@nomicfoundation/hardhat-ethers": "^3.0.9",
