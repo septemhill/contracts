@@ -4,7 +4,7 @@ const DeployP2PAndTokensModule = buildModule("DeployP2PAndTokensModule", (m) => 
   // Get the deployer account (account at index 0)
   const deployer = m.getAccount(0);
 
-  const initialSupply = 1_000_000n * 10n ** 18n;
+  const initialSupply = 1_000_000n;
 
   // Deploy Token A and Token B contracts from the deployer's account
   const tokenA = m.contract("TestToken", ["Token A", "TKA", initialSupply], {
