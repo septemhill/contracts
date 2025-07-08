@@ -333,4 +333,267 @@ contract MutatedOptionFactoryTest is Test {
         );
         vm.stopPrank();
     }
+
+    // --- Revert Tests for createOption ---
+
+    function test_Revert_CreateOption_ZeroUnderlying() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Underlying amount must be greater than 0");
+        optionPair.createOption(0, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+    }
+
+    function test_Revert_CreateOption_ZeroStrike() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Strike amount must be greater than 0");
+        optionPair.createOption(1e18, 0, 5e18, 1 days);
+        vm.stopPrank();
+    }
+
+    function test_Revert_CreateOption_ZeroPremium() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Premium amount must be greater than 0");
+        optionPair.createOption(1e18, 100e18, 0, 1 days);
+        vm.stopPrank();
+    }
+
+    function test_Revert_CreateOption_ZeroPeriod() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Period must be greater than 0");
+        optionPair.createOption(1e18, 100e18, 5e18, 0);
+        vm.stopPrank();
+    }
+
+    // --- Revert Tests for purchaseOption ---
+
+    function test_Revert_PurchaseOption_NotAvailable() public {
+        // Setup: Create and purchase an option, then try to purchase again
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        
+        // Try to purchase again
+        strikeToken.approve(address(optionPair), 5e18);
+        vm.expectRevert("Option: Not available for purchase");
+        optionPair.purchaseOption(1, 2e18);
+        vm.stopPrank();
+    }
+
+    function test_Revert_PurchaseOption_SellerCannotBuy() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        
+        strikeToken.approve(address(optionPair), 5e18);
+        vm.expectRevert("Option: Seller cannot purchase their own option");
+        optionPair.purchaseOption(1, 2e18);
+        vm.stopPrank();
+    }
+
+    // --- Revert Tests for exerciseOption ---
+
+    function test_Revert_ExerciseOption_NotActive() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        vm.expectRevert("Option: Not active");
+        optionPair.exerciseOption(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_ExerciseOption_NotBuyer() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        address otherUser = address(0x300);
+
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        vm.stopPrank();
+
+        vm.startPrank(otherUser);
+        vm.expectRevert("Option: Only the buyer can exercise this option");
+        optionPair.exerciseOption(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_ExerciseOption_Expired() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        uint256 period = 1 days;
+
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, period);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        
+        vm.warp(block.timestamp + period + 1); // Fast forward time
+        
+        vm.expectRevert("Option: Has expired");
+        optionPair.exerciseOption(1);
+        vm.stopPrank();
+    }
+
+    // --- Revert Tests for claimUnderlyingOnExpiration ---
+
+    function test_Revert_Claim_NotActive() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.expectRevert("Option: Not active or already handled");
+        optionPair.claimUnderlyingOnExpiration(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Claim_NotSeller() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        vm.warp(block.timestamp + 2 days);
+        vm.expectRevert("Option: Only the original seller can claim");
+        optionPair.claimUnderlyingOnExpiration(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Claim_NotExpired() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        vm.stopPrank();
+        
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Has not expired yet");
+        optionPair.claimUnderlyingOnExpiration(1);
+        vm.stopPrank();
+    }
+
+    // --- Revert Tests for closeOption ---
+
+    function test_Revert_Close_NotActive() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.expectRevert("Option: Not active");
+        optionPair.closeOption(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Close_NotSeller() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        vm.expectRevert("Option: Only the original seller can close this option");
+        optionPair.closeOption(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Close_Expired() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        uint256 period = 1 days;
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, period);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 2e18);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + period + 1);
+
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Has already expired");
+        optionPair.closeOption(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Close_NotPurchased() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        // For an un-purchased option, the state is AvailableForPurchase, not Active.
+        // The first check in closeOption is for the Active state.
+        vm.expectRevert("Option: Not active");
+        optionPair.closeOption(1);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Close_ZeroClosingFee() public {
+        factory.createOptionPair(address(underlyingToken), address(strikeToken));
+        optionPair = MutatedOptionPair(factory.allOptionPairs(0));
+        vm.startPrank(seller);
+        underlyingToken.approve(address(optionPair), 1e18);
+        optionPair.createOption(1e18, 100e18, 5e18, 1 days);
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        strikeToken.approve(address(optionPair), 5e18);
+        optionPair.purchaseOption(1, 0); // Purchase with 0 closing fee
+        vm.stopPrank();
+
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Closing fee must be greater than 0 to close early");
+        optionPair.closeOption(1);
+        vm.stopPrank();
+    }
 }
