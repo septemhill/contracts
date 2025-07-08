@@ -3,17 +3,17 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
-import "contracts/MutatedOptionFactory.sol";
-import "contracts/MutatedOptionPair.sol";
+import "contracts/MutatedOptionFactoryV1.sol";
+import "contracts/MutatedOptionPairV1.sol";
 import "contracts/TestToken.sol";
 
 contract MutatedOptionFactoryTest is Test {
     // --- State Variables ---
 
-    MutatedOptionFactory public factory;
+    MutatedOptionFactoryV1 public factory;
     TestToken public underlyingToken;
     TestToken public strikeToken;
-    MutatedOptionPair public optionPair;
+    MutatedOptionPairV1 public optionPair;
 
     address public seller = address(0x100);
     address public buyer = address(0x200);
@@ -23,7 +23,7 @@ contract MutatedOptionFactoryTest is Test {
 
     function setUp() public {
         // Deploy a new factory for each test
-        factory = new MutatedOptionFactory();
+        factory = new MutatedOptionFactoryV1();
 
         // Deploy mock tokens, initial supply is minted to the deployer (seller)
         vm.startPrank(seller);
@@ -57,14 +57,14 @@ contract MutatedOptionFactoryTest is Test {
 
         // 2. Create the pair using the same salt
         vm.expectEmit(true, true, true, true);
-        emit MutatedOptionFactory.OptionPairCreated(
+        emit MutatedOptionFactoryV1.OptionPairCreated(
             address(underlyingToken),
             address(strikeToken),
             predictedAddress,
             salt,
             1
         );
-        
+
         address deployedAddress = factory.createOptionPair(
             address(underlyingToken),
             address(strikeToken),
@@ -72,10 +72,22 @@ contract MutatedOptionFactoryTest is Test {
         );
 
         // 3. Verify addresses match and state is updated
-        assertEq(deployedAddress, predictedAddress, "Deployed address should match predicted address");
+        assertEq(
+            deployedAddress,
+            predictedAddress,
+            "Deployed address should match predicted address"
+        );
         assertEq(factory.totalOptionPairs(), 1, "Total pairs should be 1");
-        assertEq(factory.allOptionPairs(0), deployedAddress, "Pair address mismatch in array");
-        assertEq(factory.getPairBySalt(salt), deployedAddress, "Pair address mismatch in salt mapping");
+        assertEq(
+            factory.allOptionPairs(0),
+            deployedAddress,
+            "Pair address mismatch in array"
+        );
+        assertEq(
+            factory.getPairBySalt(salt),
+            deployedAddress,
+            "Pair address mismatch in salt mapping"
+        );
     }
 
     function test_Factory_CreatePair_Revert_SaltUsed() public {
@@ -126,7 +138,7 @@ contract MutatedOptionFactoryTest is Test {
             address(strikeToken),
             salt
         );
-        optionPair = MutatedOptionPair(pairAddress);
+        optionPair = MutatedOptionPairV1(pairAddress);
 
         // --- Test Constants ---
         uint256 underlyingAmount = 1e18; // 1 ULT
@@ -157,7 +169,7 @@ contract MutatedOptionFactoryTest is Test {
             ,
             ,
             ,
-            MutatedOptionPair.OptionState optState
+            MutatedOptionPairV1.OptionState optState
         ) = optionPair.options(optionId);
         assertEq(optSeller, seller, "Seller mismatch");
         assertEq(
@@ -167,7 +179,7 @@ contract MutatedOptionFactoryTest is Test {
         );
         assertEq(
             uint(optState),
-            uint(MutatedOptionPair.OptionState.AvailableForPurchase),
+            uint(MutatedOptionPairV1.OptionState.AvailableForPurchase),
             "State should be Available"
         );
         assertEq(
@@ -193,13 +205,13 @@ contract MutatedOptionFactoryTest is Test {
             ,
             ,
             uint256 optClosingFee,
-            MutatedOptionPair.OptionState optStateAfterPurchase
+            MutatedOptionPairV1.OptionState optStateAfterPurchase
         ) = optionPair.options(optionId);
         assertEq(optBuyer, buyer, "Buyer mismatch");
         assertEq(optClosingFee, closingFee, "Closing fee mismatch");
         assertEq(
             uint(optStateAfterPurchase),
-            uint(MutatedOptionPair.OptionState.Active),
+            uint(MutatedOptionPairV1.OptionState.Active),
             "State should be Active"
         );
         assertEq(
@@ -225,11 +237,11 @@ contract MutatedOptionFactoryTest is Test {
             ,
             ,
             ,
-            MutatedOptionPair.OptionState optStateAfterExercise
+            MutatedOptionPairV1.OptionState optStateAfterExercise
         ) = optionPair.options(optionId);
         assertEq(
             uint(optStateAfterExercise),
-            uint(MutatedOptionPair.OptionState.Exercised),
+            uint(MutatedOptionPairV1.OptionState.Exercised),
             "State should be Exercised"
         );
         assertEq(
@@ -259,7 +271,7 @@ contract MutatedOptionFactoryTest is Test {
             address(strikeToken),
             salt
         );
-        optionPair = MutatedOptionPair(pairAddress);
+        optionPair = MutatedOptionPairV1(pairAddress);
         uint256 underlyingAmount = 1e18;
         uint256 period = 1 days;
         uint256 optionId = 1;
@@ -288,11 +300,11 @@ contract MutatedOptionFactoryTest is Test {
         optionPair.claimUnderlyingOnExpiration(optionId);
 
         // Verify
-        (, , , , , , , , MutatedOptionPair.OptionState optState) = optionPair
+        (, , , , , , , , MutatedOptionPairV1.OptionState optState) = optionPair
             .options(optionId);
         assertEq(
             uint(optState),
-            uint(MutatedOptionPair.OptionState.Expired),
+            uint(MutatedOptionPairV1.OptionState.Expired),
             "State should be Expired"
         );
         assertEq(
@@ -317,7 +329,7 @@ contract MutatedOptionFactoryTest is Test {
             address(strikeToken),
             salt
         );
-        optionPair = MutatedOptionPair(pairAddress);
+        optionPair = MutatedOptionPairV1(pairAddress);
         uint256 underlyingAmount = 1e18;
         uint256 closingFee = 2e18;
         uint256 optionId = 1;
@@ -345,11 +357,11 @@ contract MutatedOptionFactoryTest is Test {
         optionPair.closeOption(optionId);
 
         // Verify
-        (, , , , , , , , MutatedOptionPair.OptionState optState) = optionPair
+        (, , , , , , , , MutatedOptionPairV1.OptionState optState) = optionPair
             .options(optionId);
         assertEq(
             uint(optState),
-            uint(MutatedOptionPair.OptionState.Closed),
+            uint(MutatedOptionPairV1.OptionState.Closed),
             "State should be Closed"
         );
         assertEq(
@@ -374,8 +386,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_CreateOption_ZeroUnderlying() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-0"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         vm.expectRevert("Option: Underlying amount must be greater than 0");
         optionPair.createOption(0, 100e18, 5e18, 1 days);
@@ -384,8 +400,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_CreateOption_ZeroStrike() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-1"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         vm.expectRevert("Option: Strike amount must be greater than 0");
         optionPair.createOption(1e18, 0, 5e18, 1 days);
@@ -394,8 +414,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_CreateOption_ZeroPremium() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-2"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         vm.expectRevert("Option: Premium amount must be greater than 0");
         optionPair.createOption(1e18, 100e18, 0, 1 days);
@@ -404,8 +428,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_CreateOption_ZeroPeriod() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-3"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         vm.expectRevert("Option: Period must be greater than 0");
         optionPair.createOption(1e18, 100e18, 5e18, 0);
@@ -417,8 +445,12 @@ contract MutatedOptionFactoryTest is Test {
     function test_Revert_PurchaseOption_NotAvailable() public {
         // Setup: Create and purchase an option, then try to purchase again
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-4"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -427,7 +459,7 @@ contract MutatedOptionFactoryTest is Test {
         vm.startPrank(buyer);
         strikeToken.approve(address(optionPair), 5e18);
         optionPair.purchaseOption(1, 2e18);
-        
+
         // Try to purchase again
         strikeToken.approve(address(optionPair), 5e18);
         vm.expectRevert("Option: Not available for purchase");
@@ -437,12 +469,16 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_PurchaseOption_SellerCannotBuy() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-5"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
-        
+
         strikeToken.approve(address(optionPair), 5e18);
         vm.expectRevert("Option: Seller cannot purchase their own option");
         optionPair.purchaseOption(1, 2e18);
@@ -453,8 +489,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_ExerciseOption_NotActive() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-6"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -468,8 +508,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_ExerciseOption_NotBuyer() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-7"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         address otherUser = address(0x300);
 
         vm.startPrank(seller);
@@ -490,8 +534,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_ExerciseOption_Expired() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-8"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         uint256 period = 1 days;
 
         vm.startPrank(seller);
@@ -502,9 +550,9 @@ contract MutatedOptionFactoryTest is Test {
         vm.startPrank(buyer);
         strikeToken.approve(address(optionPair), 5e18);
         optionPair.purchaseOption(1, 2e18);
-        
+
         vm.warp(block.timestamp + period + 1); // Fast forward time
-        
+
         vm.expectRevert("Option: Has expired");
         optionPair.exerciseOption(1);
         vm.stopPrank();
@@ -514,8 +562,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Claim_NotActive() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-9"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -526,8 +578,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Claim_NotSeller() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-10"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -544,8 +600,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Claim_NotExpired() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-11"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -555,7 +615,7 @@ contract MutatedOptionFactoryTest is Test {
         strikeToken.approve(address(optionPair), 5e18);
         optionPair.purchaseOption(1, 2e18);
         vm.stopPrank();
-        
+
         vm.startPrank(seller);
         vm.expectRevert("Option: Has not expired yet");
         optionPair.claimUnderlyingOnExpiration(1);
@@ -566,8 +626,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Close_NotActive() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-12"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -578,8 +642,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Close_NotSeller() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-13"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -588,15 +656,21 @@ contract MutatedOptionFactoryTest is Test {
         vm.startPrank(buyer);
         strikeToken.approve(address(optionPair), 5e18);
         optionPair.purchaseOption(1, 2e18);
-        vm.expectRevert("Option: Only the original seller can close this option");
+        vm.expectRevert(
+            "Option: Only the original seller can close this option"
+        );
         optionPair.closeOption(1);
         vm.stopPrank();
     }
 
     function test_Revert_Close_Expired() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-14"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         uint256 period = 1 days;
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
@@ -618,8 +692,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Close_NotPurchased() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-15"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -632,8 +710,12 @@ contract MutatedOptionFactoryTest is Test {
 
     function test_Revert_Close_ZeroClosingFee() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-16"));
-        address pairAddress = factory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPair(pairAddress);
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        optionPair = MutatedOptionPairV1(pairAddress);
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), 1e18);
         optionPair.createOption(1e18, 100e18, 5e18, 1 days);
@@ -645,7 +727,9 @@ contract MutatedOptionFactoryTest is Test {
         vm.stopPrank();
 
         vm.startPrank(seller);
-        vm.expectRevert("Option: Closing fee must be greater than 0 to close early");
+        vm.expectRevert(
+            "Option: Closing fee must be greater than 0 to close early"
+        );
         optionPair.closeOption(1);
         vm.stopPrank();
     }

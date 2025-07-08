@@ -11,7 +11,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * an underlying token and a strike token. The strike token is also used for
  * premiums and closing fees. This contract is intended to be deployed by a factory.
  */
-contract MutatedOptionPair is ReentrancyGuard {
+contract MutatedOptionPairV1 is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // --- State Variables ---

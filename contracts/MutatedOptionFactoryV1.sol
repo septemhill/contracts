@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./MutatedOptionPair.sol";
+import "./MutatedOptionPairV1.sol";
 
-contract MutatedOptionFactory {
+contract MutatedOptionFactoryV1 {
     address[] public allOptionPairs;
     mapping(bytes32 => address) public getPairBySalt;
 
@@ -29,7 +29,7 @@ contract MutatedOptionFactory {
         bytes32 _salt
     ) public view returns (address) {
         bytes memory bytecode = abi.encodePacked(
-            type(MutatedOptionPair).creationCode,
+            type(MutatedOptionPairV1).creationCode,
             abi.encode(_underlyingToken, _strikeToken)
         );
         
@@ -70,7 +70,7 @@ contract MutatedOptionFactory {
             "Factory: Salt has been used"
         );
 
-        MutatedOptionPair newOptionPair = new MutatedOptionPair{salt: _salt}(
+        MutatedOptionPairV1 newOptionPair = new MutatedOptionPairV1{salt: _salt}(
             _underlyingToken,
             _strikeToken
         );
