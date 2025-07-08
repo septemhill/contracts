@@ -149,14 +149,14 @@ contract MutatedOptionTest is Test {
         );
 
         (
-            uint256 retrievedOptionId,
+            ,
             address retrievedSeller,
-            address retrievedBuyer,
-            address retrievedUnderlyingTokenAddress,
+            ,
+            ,
             uint256 retrievedUnderlyingAmount,
-            address retrievedStrikeTokenAddress,
-            uint256 retrievedStrikeAmount,
-            uint256 retrievedPremiumAmount,
+            ,
+            ,
+            ,
             uint256 retrievedExpirationTimestamp,
             uint256 retrievedClosingFeeAmount,
             MutatedOption.OptionState retrievedState
@@ -291,16 +291,16 @@ contract MutatedOptionTest is Test {
         );
 
         (
-            uint256 optionId_,
-            address seller_,
+            ,
+            ,
             address retrievedBuyer,
-            address underlyingToken_,
-            uint256 underlyingAmount_,
-            address strikeToken_,
-            uint256 strikeAmount_,
-            uint256 premiumAmount_,
-            uint256 expirationTimestamp_,
-            uint256 closingFeeAmount_,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
             MutatedOption.OptionState retrievedState
         ) = mutatedOption.options(optionId);
         assertEq(retrievedBuyer, buyer1);
@@ -402,16 +402,16 @@ contract MutatedOptionTest is Test {
         assertEq(underlyingToken.balanceOf(address(mutatedOption)), 0);
 
         (
-            uint256 optionId_,
-            address seller_,
-            address buyer_,
-            address underlyingTokenAddress_,
-            uint256 underlyingAmount_,
-            address strikeTokenAddress_,
-            uint256 strikeAmount_,
-            uint256 premiumAmount_,
-            uint256 expirationTimestamp_,
-            uint256 closingFeeAmount_,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
             MutatedOption.OptionState retrievedState
         ) = mutatedOption.options(optionId);
         assertEq(
@@ -425,7 +425,7 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        // uint256 closingFeeAmount = 5 ether;
 
         uint256 optionId = _createOption(
             seller,
@@ -523,16 +523,16 @@ contract MutatedOptionTest is Test {
         assertEq(underlyingToken.balanceOf(address(mutatedOption)), 0);
 
         (
-            uint256 optionId_,
-            address seller_,
-            address buyer_,
-            address underlyingTokenAddress_,
-            uint256 underlyingAmount_,
-            address strikeTokenAddress_,
-            uint256 strikeAmount_,
-            uint256 premiumAmount_,
-            uint256 expirationTimestamp_,
-            uint256 closingFeeAmount_,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
             MutatedOption.OptionState retrievedState
         ) = mutatedOption.options(optionId);
         assertEq(
@@ -546,7 +546,7 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 1;
-        uint256 closingFeeAmount = 5 ether;
+        // uint256 closingFeeAmount = 5 ether;
 
         uint256 optionId = _createOption(
             seller,
@@ -660,16 +660,16 @@ contract MutatedOptionTest is Test {
         );
 
         (
-            uint256 optionId_,
-            address seller_,
-            address buyer_,
-            address underlyingTokenAddress_,
-            uint256 underlyingAmount_,
-            address strikeTokenAddress_,
-            uint256 strikeAmount_,
-            uint256 premiumAmount_,
-            uint256 expirationTimestamp_,
-            uint256 closingFeeAmount_,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
             MutatedOption.OptionState retrievedState
         ) = mutatedOption.options(optionId);
         assertEq(
@@ -683,7 +683,7 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        // uint256 closingFeeAmount = 5 ether;
 
         uint256 optionId = _createOption(
             seller,
@@ -752,7 +752,7 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether; // Even if a fee is specified, if no buyer, it should revert
+        // uint256 closingFeeAmount = 5 ether; // Even if a fee is specified, if no buyer, it should revert
 
         uint256 optionId = _createOption(
             seller,
