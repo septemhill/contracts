@@ -38,8 +38,7 @@ contract MutatedOptionTest is Test {
         uint256 _underlyingAmount,
         uint256 _strikeAmount,
         uint256 _premiumAmount,
-        uint256 _periodInSeconds,
-        uint256 _closingFeeAmount
+        uint256 _periodInSeconds
     ) internal returns (uint256 optionId) {
         vm.startPrank(_seller);
         underlyingToken.approve(address(mutatedOption), _underlyingAmount);
@@ -49,8 +48,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             _strikeAmount,
             _premiumAmount,
-            _periodInSeconds,
-            _closingFeeAmount
+            _periodInSeconds
         );
         vm.stopPrank();
         return 1; // Assuming first option created will have ID 1
@@ -60,11 +58,12 @@ contract MutatedOptionTest is Test {
     function _purchaseOption(
         address _buyer,
         uint256 _optionId,
-        uint256 _premiumAmount
+        uint256 _premiumAmount,
+        uint256 _closingFeeAmount
     ) internal {
         vm.startPrank(_buyer);
         strikeToken.approve(address(mutatedOption), _premiumAmount);
-        mutatedOption.purchaseOption(_optionId);
+        mutatedOption.purchaseOption(_optionId, _closingFeeAmount);
         vm.stopPrank();
     }
 
@@ -83,11 +82,11 @@ contract MutatedOptionTest is Test {
     // Helper function to close an option
     function _closeOption(
         address _seller,
-        uint256 _optionId,
-        uint256 _closingFeeAmount
+        uint256 _optionId
     ) internal {
         vm.startPrank(_seller);
-        strikeToken.approve(address(mutatedOption), _closingFeeAmount);
+        // Approve is needed for the seller to transfer closingFeeAmount to the contract
+        // The actual closingFeeAmount is retrieved from the option struct
         mutatedOption.closeOption(_optionId);
         vm.stopPrank();
     }
@@ -98,7 +97,7 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 ether; // This is for purchaseOption, not createOption
 
         uint256 sellerInitialUnderlyingBalance = underlyingToken.balanceOf(seller);
 
@@ -116,8 +115,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             strikeAmount,
             premiumAmount,
-            expectedExpirationTimestamp,
-            closingFeeAmount
+            expectedExpirationTimestamp
         );
 
         mutatedOption.createOption(
@@ -126,8 +124,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
         vm.stopPrank();
 
@@ -139,6 +136,7 @@ contract MutatedOptionTest is Test {
         assertEq(retrievedUnderlyingAmount, underlyingAmount);
         assertEq(uint8(retrievedState), uint8(MutatedOption.OptionState.AvailableForPurchase));
         assertEq(retrievedExpirationTimestamp, expectedExpirationTimestamp);
+        assertEq(retrievedClosingFeeAmount, 0); // closingFeeAmount should be 0 initially
     }
 
     function testCreateOptionRevertZeroUnderlyingAmount() public {
@@ -146,7 +144,6 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
 
         vm.startPrank(seller);
         vm.expectRevert("Underlying amount must be greater than 0");
@@ -156,8 +153,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
         vm.stopPrank();
     }
@@ -167,7 +163,6 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 0;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
 
         vm.startPrank(seller);
         vm.expectRevert("Strike amount must be greater than 0");
@@ -177,8 +172,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
         vm.stopPrank();
     }
@@ -188,7 +182,6 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 0;
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
 
         vm.startPrank(seller);
         vm.expectRevert("Premium amount must be greater than 0");
@@ -198,8 +191,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
         vm.stopPrank();
     }
@@ -209,7 +201,6 @@ contract MutatedOptionTest is Test {
         uint256 strikeAmount = 45 ether;
         uint256 premiumAmount = 10 ether;
         uint256 periodInSeconds = 0;
-        uint256 closingFeeAmount = 5 ether;
 
         vm.startPrank(seller);
         vm.expectRevert("Period must be greater than 0");
@@ -219,8 +210,7 @@ contract MutatedOptionTest is Test {
             address(strikeToken),
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
         vm.stopPrank();
     }
@@ -238,8 +228,7 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
 
         uint256 sellerInitialStrikeBalance = strikeToken.balanceOf(seller);
@@ -249,9 +238,9 @@ contract MutatedOptionTest is Test {
         strikeToken.approve(address(mutatedOption), premiumAmount);
 
         vm.expectEmit(true, true, true, true);
-        emit MutatedOption.OptionPurchased(optionId, buyer1, seller, premiumAmount);
+        emit MutatedOption.OptionPurchased(optionId, buyer1, seller, premiumAmount, closingFeeAmount);
 
-        mutatedOption.purchaseOption(optionId);
+        mutatedOption.purchaseOption(optionId, closingFeeAmount);
         vm.stopPrank();
 
         assertEq(strikeToken.balanceOf(seller), sellerInitialStrikeBalance + premiumAmount);
@@ -274,15 +263,14 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
 
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.startPrank(buyer2);
         vm.expectRevert("Option not available for purchase");
-        mutatedOption.purchaseOption(optionId);
+        mutatedOption.purchaseOption(optionId, closingFeeAmount);
         vm.stopPrank();
     }
 
@@ -298,13 +286,12 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
 
         vm.startPrank(seller);
         vm.expectRevert("Seller cannot purchase their own option");
-        mutatedOption.purchaseOption(optionId); // Seller tries to purchase their own option
+        mutatedOption.purchaseOption(optionId, closingFeeAmount); // Seller tries to purchase their own option
         vm.stopPrank();
     }
 
@@ -321,10 +308,9 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         uint256 sellerInitialStrikeBalance = strikeToken.balanceOf(seller);
         uint256 buyer1InitialUnderlyingBalance = underlyingToken.balanceOf(buyer1);
@@ -364,8 +350,7 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
 
         vm.startPrank(buyer1);
@@ -386,10 +371,9 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.startPrank(buyer2);
         vm.expectRevert("Only the buyer can exercise this option");
@@ -409,10 +393,9 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.warp(block.timestamp + periodInSeconds + 1); // Advance time past expiration
 
@@ -435,10 +418,9 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         uint256 sellerInitialUnderlyingBalance = underlyingToken.balanceOf(seller);
 
@@ -469,8 +451,7 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
 
         vm.warp(block.timestamp + periodInSeconds + 1); // Advance time past expiration
@@ -492,10 +473,9 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.warp(block.timestamp + periodInSeconds + 1); // Advance time past expiration
 
@@ -516,10 +496,9 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.expectRevert("Option has not expired yet");
         vm.prank(seller);
@@ -539,13 +518,17 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         uint256 sellerInitialUnderlyingBalance = underlyingToken.balanceOf(seller);
         uint256 buyer1InitialStrikeBalance = strikeToken.balanceOf(buyer1);
+
+        // Seller needs to approve the closing fee before calling closeOption
+        vm.startPrank(seller);
+        strikeToken.approve(address(mutatedOption), closingFeeAmount);
+        vm.stopPrank();
 
         vm.expectEmit(true, true, true, true);
         emit MutatedOption.OptionClosed(
@@ -556,7 +539,7 @@ contract MutatedOptionTest is Test {
             underlyingAmount
         );
 
-        _closeOption(seller, optionId, closingFeeAmount);
+        _closeOption(seller, optionId);
 
         assertEq(underlyingToken.balanceOf(seller), sellerInitialUnderlyingBalance + underlyingAmount);
         assertEq(strikeToken.balanceOf(buyer1), buyer1InitialStrikeBalance + closingFeeAmount);
@@ -578,12 +561,11 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
 
         vm.expectRevert("Option is not active");
-        _closeOption(seller, optionId, closingFeeAmount); // Not purchased yet
+        _closeOption(seller, optionId); // Not purchased yet
     }
 
     function testCloseOptionRevertNotSeller() public {
@@ -598,13 +580,12 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.expectRevert("Only the original seller can close this option");
-        _closeOption(buyer1, optionId, closingFeeAmount); // Buyer tries to close
+        _closeOption(buyer1, optionId); // Buyer tries to close
     }
 
     function testCloseOptionRevertExpired() public {
@@ -619,34 +600,13 @@ contract MutatedOptionTest is Test {
             underlyingAmount,
             strikeAmount,
             premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
+            periodInSeconds
         );
-        _purchaseOption(buyer1, optionId, premiumAmount);
+        _purchaseOption(buyer1, optionId, premiumAmount, closingFeeAmount);
 
         vm.warp(block.timestamp + periodInSeconds + 1); // Advance time past expiration
 
         vm.expectRevert("Option has already expired");
-        _closeOption(seller, optionId, closingFeeAmount);
-    }
-
-    function testCloseOptionRevertNotPurchased() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
-        uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
-
-        uint256 optionId = _createOption(
-            seller,
-            underlyingAmount,
-            strikeAmount,
-            premiumAmount,
-            periodInSeconds,
-            closingFeeAmount
-        );
-
-        vm.expectRevert("Option has not been purchased yet");
-        _closeOption(seller, optionId, closingFeeAmount);
+        _closeOption(seller, optionId);
     }
 }
