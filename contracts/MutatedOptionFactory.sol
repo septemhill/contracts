@@ -5,24 +5,54 @@ import "./MutatedOptionPair.sol";
 
 contract MutatedOptionFactory {
     address[] public allOptionPairs;
+    mapping(bytes32 => address) public getPairBySalt;
 
     event OptionPairCreated(
         address indexed underlyingToken,
         address indexed strikeToken,
         address pairAddress,
+        bytes32 salt,
         uint256 totalPairs
     );
 
     /**
-     * @dev Deploys a new MutatedOptionPair contract for a specific token pair.
-     * Assumes premium and settlement tokens are the same as the strike token.
+     * @dev Calculates the deterministic address for a new MutatedOptionPair contract.
+     * This function allows predicting the address before deployment without consuming gas for state changes.
+     * @param _underlyingToken The address of the underlying token.
+     * @param _strikeToken The address of the strike token.
+     * @param _salt A user-provided salt to ensure a unique, predictable address.
+     * @return The predicted address of the new option pair contract.
+     */
+    function getPairAddress(
+        address _underlyingToken,
+        address _strikeToken,
+        bytes32 _salt
+    ) public view returns (address) {
+        bytes memory bytecode = abi.encodePacked(
+            type(MutatedOptionPair).creationCode,
+            abi.encode(_underlyingToken, _strikeToken)
+        );
+        
+        return address(uint160(uint256(keccak256(abi.encodePacked(
+            bytes1(0xff),
+            address(this),
+            _salt,
+            keccak256(bytecode)
+        )))));
+    }
+
+    /**
+     * @dev Deploys a new MutatedOptionPair contract using CREATE2 for a deterministic address.
      * @param _underlyingToken The address of the underlying token (e.g., WBTC).
      * @param _strikeToken The address of the strike token (e.g., WETH, USDC).
+     * @param _salt A user-provided salt for deterministic deployment. Must not have been used before.
+     * @return The address of the newly created option pair contract.
      */
     function createOptionPair(
         address _underlyingToken,
-        address _strikeToken
-    ) external {
+        address _strikeToken,
+        bytes32 _salt
+    ) external returns (address) {
         require(
             _underlyingToken != address(0),
             "Factory: Underlying token cannot be zero address"
@@ -35,20 +65,29 @@ contract MutatedOptionFactory {
             _underlyingToken != _strikeToken,
             "Factory: Tokens cannot be the same"
         );
+        require(
+            getPairBySalt[_salt] == address(0),
+            "Factory: Salt has been used"
+        );
 
-        MutatedOptionPair newOptionPair = new MutatedOptionPair(
+        MutatedOptionPair newOptionPair = new MutatedOptionPair{salt: _salt}(
             _underlyingToken,
             _strikeToken
         );
 
-        allOptionPairs.push(address(newOptionPair));
+        address pairAddress = address(newOptionPair);
+        allOptionPairs.push(pairAddress);
+        getPairBySalt[_salt] = pairAddress;
 
         emit OptionPairCreated(
             _underlyingToken,
             _strikeToken,
-            address(newOptionPair),
+            pairAddress,
+            _salt,
             allOptionPairs.length
         );
+        
+        return pairAddress;
     }
 
     /**
