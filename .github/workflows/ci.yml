@@ -35,7 +35,7 @@ jobs:
         run: pnpm install
 
       - name: Install Foundry libraries
-        run: forge install foundry-rs/forge-std --no-commit
+        run: forge install
 
       - name: Compile with Hardhat
         run: pnpm hardhat compile
