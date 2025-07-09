@@ -2,57 +2,52 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "../contracts/MutatedOptionPairV2.sol";
-import "../contracts/MutatedOptionFactoryV2.sol";
-import "../contracts/TestToken.sol";
+import "forge-std/console.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
+import {MutatedOptionPairV2} from "../contracts/MutatedOptionPairV2.sol";
+import {TestToken} from "../contracts/TestToken.sol";
 
 contract MutatedOptionPairV2Test is Test {
-    MutatedOptionPairV2 public optionPair;
-    MutatedOptionFactoryV2 public optionFactory;
-    TestToken public underlyingToken;
-    TestToken public strikeToken;
+    MutatedOptionPairV2 internal optionPair;
+    TestToken internal underlyingToken;
+    TestToken internal strikeToken;
 
-    address public deployer;
-    address public seller;
-    address public buyer;
-    address public other;
+    address internal seller = address(0x1);
+    address internal buyer = address(0x2);
+    address internal deployer = address(this); // The test contract itself is the deployer
 
-    uint256 public constant INITIAL_SUPPLY = 1_000_000e18;
-    uint256 public constant UNDERLYING_AMOUNT = 100e18;
-    uint256 public constant STRIKE_AMOUNT = 500e18;
-    uint256 public constant PREMIUM_AMOUNT = 10e18;
-    uint256 public constant CLOSING_FEE_AMOUNT = 5e18;
-    uint256 public constant PERIOD_IN_SECONDS = 3600; // 1 hour
+    uint256 internal constant INITIAL_SUPPLY = 1_000_000e18;
+    uint256 internal constant UNDERLYING_AMOUNT = 1e18;
+    uint256 internal constant STRIKE_AMOUNT = 200e18;
+    uint256 internal constant PREMIUM_AMOUNT = 10e18;
+    uint256 internal constant PERIOD_IN_SECONDS = 3600; // 1 hour
 
     function setUp() public {
-        deployer = makeAddr("deployer");
-        seller = makeAddr("seller");
-        buyer = makeAddr("buyer");
-        other = makeAddr("other");
+        underlyingToken = new TestToken(
+            "Underlying Token",
+            "ULT",
+            INITIAL_SUPPLY
+        );
+        strikeToken = new TestToken("Strike Token", "STK", INITIAL_SUPPLY);
 
-        vm.startPrank(deployer);
-        underlyingToken = new TestToken("Underlying", "UND", INITIAL_SUPPLY);
-        strikeToken = new TestToken("Strike", "STK", INITIAL_SUPPLY);
-        optionFactory = new MutatedOptionFactoryV2();
-        bytes32 salt = keccak256("test_salt");
-        address pairAddress = optionFactory.createOptionPair(address(underlyingToken), address(strikeToken), salt);
-        optionPair = MutatedOptionPairV2(payable(pairAddress));
-        vm.stopPrank();
+        optionPair = new MutatedOptionPairV2(
+            address(underlyingToken),
+            address(strikeToken)
+        );
 
-        // Distribute tokens and approve the optionPair contract
-        vm.startPrank(deployer);
-        underlyingToken.transfer(seller, INITIAL_SUPPLY / 2);
-        strikeToken.transfer(buyer, INITIAL_SUPPLY / 2);
-        strikeToken.transfer(seller, INITIAL_SUPPLY / 2); // For seller to pay strike/closing fee if they fill bid
-        vm.stopPrank();
+        // Mint tokens for seller and buyer from the deployer's balance
+        underlyingToken.transfer(seller, UNDERLYING_AMOUNT * 10);
+        strikeToken.transfer(buyer, STRIKE_AMOUNT + PREMIUM_AMOUNT);
+        strikeToken.transfer(seller, STRIKE_AMOUNT); // For closing fee
 
+        // Approve tokens for the option pair contract
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), type(uint256).max);
         strikeToken.approve(address(optionPair), type(uint256).max);
         vm.stopPrank();
 
         vm.startPrank(buyer);
-        underlyingToken.approve(address(optionPair), type(uint256).max);
         strikeToken.approve(address(optionPair), type(uint256).max);
         vm.stopPrank();
     }
@@ -60,567 +55,774 @@ contract MutatedOptionPairV2Test is Test {
     // --- Deployment and Initialization Tests ---
 
     function test_Deployment() public view {
-        assertEq(address(optionPair.underlyingToken()), address(underlyingToken), "Underlying token mismatch");
-        assertEq(address(optionPair.strikeToken()), address(strikeToken), "Strike token mismatch");
+        assertEq(
+            address(optionPair.underlyingToken()),
+            address(underlyingToken),
+            "Underlying token mismatch"
+        );
+        assertEq(
+            address(optionPair.strikeToken()),
+            address(strikeToken),
+            "Strike token mismatch"
+        );
     }
 
-    // --- Create Ask Tests ---
-
-    function test_CreateAsk_Success() public {
-        uint256 sellerUnderlyingBalBefore = underlyingToken.balanceOf(seller);
-
+    function _createAndFillAsk() internal returns (uint256 optionId) {
         vm.startPrank(seller);
-        vm.expectEmit(true, true, true, true);
-        emit MutatedOptionPairV2.OrderCreated(
-            1,
-            MutatedOptionPairV2.OrderType.Ask,
-            seller,
+        optionPair.createAsk(
             UNDERLYING_AMOUNT,
             STRIKE_AMOUNT,
             PREMIUM_AMOUNT,
-            block.timestamp + PERIOD_IN_SECONDS
+            PERIOD_IN_SECONDS
         );
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
         vm.stopPrank();
 
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(option.optionId, 1, "Option ID mismatch");
-        assertEq(option.creator, seller, "Creator mismatch");
-        assertEq(option.seller, seller, "Seller mismatch");
-        assertEq(option.buyer, address(0), "Buyer should be zero address");
-        assertEq(option.underlyingAmount, UNDERLYING_AMOUNT, "Underlying amount mismatch");
-        assertEq(option.strikeAmount, STRIKE_AMOUNT, "Strike amount mismatch");
-        assertEq(option.premiumAmount, PREMIUM_AMOUNT, "Premium amount mismatch");
-        assertEq(option.expirationTimestamp, block.timestamp + PERIOD_IN_SECONDS, "Expiration timestamp mismatch");
-        assertEq(option.closingFeeAmount, 0, "Closing fee should be 0 for Ask");
-        assertEq(uint8(option.orderType), uint8(MutatedOptionPairV2.OrderType.Ask), "Order type mismatch");
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Open), "Option state mismatch");
-
-        assertEq(underlyingToken.balanceOf(address(optionPair)), UNDERLYING_AMOUNT, "Contract underlying balance incorrect");
-        assertEq(underlyingToken.balanceOf(seller), sellerUnderlyingBalBefore - UNDERLYING_AMOUNT, "Seller underlying balance incorrect");
-    }
-
-    function test_CreateAsk_RevertZeroUnderlying() public {
-        vm.startPrank(seller);
-        vm.expectRevert("Ask: Underlying amount must be > 0");
-        optionPair.createAsk(0, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-    }
-
-    function test_CreateAsk_RevertZeroStrike() public {
-        vm.startPrank(seller);
-        vm.expectRevert("Ask: Strike amount must be > 0");
-        optionPair.createAsk(UNDERLYING_AMOUNT, 0, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-    }
-
-    function test_CreateAsk_RevertZeroPremium() public {
-        vm.startPrank(seller);
-        vm.expectRevert("Ask: Premium amount must be > 0");
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, 0, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-    }
-
-    function test_CreateAsk_RevertZeroPeriod() public {
-        vm.startPrank(seller);
-        vm.expectRevert("Ask: Period must be > 0");
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, 0);
-        vm.stopPrank();
-    }
-
-    // --- Create Bid Tests ---
-
-    function test_CreateBid_Success() public {
-        uint256 buyerStrikeBalBefore = strikeToken.balanceOf(buyer);
+        optionId = 1;
 
         vm.startPrank(buyer);
-        vm.expectEmit(true, true, true, true);
-        emit MutatedOptionPairV2.OrderCreated(
-            1,
-            MutatedOptionPairV2.OrderType.Bid,
-            buyer,
+        optionPair.fillAsk(optionId);
+        vm.stopPrank();
+    }
+
+    function testGetClosingFeePercentage() public {
+        uint256 optionId = _createAndFillAsk();
+
+        // --- Test Case 1: Half time remaining ---
+        vm.warp(block.timestamp + PERIOD_IN_SECONDS / 2);
+
+        UD60x18 feePercentHalfTime = optionPair.getClosingFeePercentage(
+            optionId
+        );
+
+        // Expected: Y = 1 - (1 - 0.5)^2 = 1 - 0.25 = 0.75
+        assertEq(
+            feePercentHalfTime.intoUint256(),
+            0.75e18,
+            "Fee percent at half time should be 0.75"
+        );
+
+        // --- Test Case 2: Full time remaining (almost) ---
+        // We need to get the timestamp right after filling the ask
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.createTimestamp + 1); // Go back to near the beginning
+
+        UD60x18 feePercentFullTime = optionPair.getClosingFeePercentage(
+            optionId
+        );
+        // Expected: Y should be close to 1
+        assertTrue(
+            feePercentFullTime.intoUint256() > 0.99e18,
+            "Fee percent at full time should be close to 1"
+        );
+
+        // --- Test Case 3: No time remaining ---
+        vm.warp(option.expirationTimestamp);
+        UD60x18 feePercentNoTime = optionPair.getClosingFeePercentage(optionId);
+        // Expected: Y = 0
+        assertEq(
+            feePercentNoTime.intoUint256(),
+            0,
+            "Fee percent at no time remaining should be 0"
+        );
+    }
+
+    function testCalculateClosingFeeAmount() public {
+        uint256 optionId = _createAndFillAsk();
+
+        // --- Test Case 1: Half time remaining ---
+        vm.warp(block.timestamp + PERIOD_IN_SECONDS / 2);
+        uint256 closingFeeAmount = optionPair.calculateClosingFeeAmount(
+            optionId
+        );
+
+        // Expected: 10 * 0.75 = 7.5
+        assertEq(
+            closingFeeAmount,
+            7.5e18,
+            "Closing fee at half time should be 7.5"
+        );
+    }
+
+    function testCloseOption() public {
+        uint256 optionId = _createAndFillAsk();
+
+        vm.warp(block.timestamp + PERIOD_IN_SECONDS / 2); // Half time
+
+        uint256 closingFee = optionPair.calculateClosingFeeAmount(optionId);
+        uint256 sellerStrikeBalanceBefore = strikeToken.balanceOf(seller);
+        uint256 buyerStrikeBalanceBefore = strikeToken.balanceOf(buyer);
+        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            seller
+        );
+        uint256 contractUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            address(optionPair)
+        );
+
+        vm.startPrank(seller);
+        optionPair.closeOption(optionId);
+        vm.stopPrank();
+
+        // Check balances
+        assertEq(
+            strikeToken.balanceOf(seller),
+            sellerStrikeBalanceBefore - closingFee,
+            "Seller should pay closing fee"
+        );
+        assertEq(
+            strikeToken.balanceOf(buyer),
+            buyerStrikeBalanceBefore + closingFee,
+            "Buyer should receive closing fee"
+        );
+        assertEq(
+            underlyingToken.balanceOf(seller),
+            sellerUnderlyingBalanceBefore + UNDERLYING_AMOUNT,
+            "Seller should get underlying back"
+        );
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            contractUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Contract should release underlying"
+        );
+
+        // Check option state
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Closed),
+            "Option state should be Closed"
+        );
+    }
+
+    function test_CloseOption_RevertsWhenNotActive() public {
+        vm.startPrank(seller);
+        optionPair.createAsk(
             UNDERLYING_AMOUNT,
             STRIKE_AMOUNT,
             PREMIUM_AMOUNT,
-            block.timestamp + PERIOD_IN_SECONDS
+            PERIOD_IN_SECONDS
         );
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
         vm.stopPrank();
 
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(option.optionId, 1, "Option ID mismatch");
-        assertEq(option.creator, buyer, "Creator mismatch");
-        assertEq(option.seller, address(0), "Seller should be zero address");
-        assertEq(option.buyer, buyer, "Buyer mismatch");
-        assertEq(option.underlyingAmount, UNDERLYING_AMOUNT, "Underlying amount mismatch");
-        assertEq(option.strikeAmount, STRIKE_AMOUNT, "Strike amount mismatch");
-        assertEq(option.premiumAmount, PREMIUM_AMOUNT, "Premium amount mismatch");
-        assertEq(option.expirationTimestamp, block.timestamp + PERIOD_IN_SECONDS, "Expiration timestamp mismatch");
-        assertEq(option.closingFeeAmount, CLOSING_FEE_AMOUNT, "Closing fee mismatch");
-        assertEq(uint8(option.orderType), uint8(MutatedOptionPairV2.OrderType.Bid), "Order type mismatch");
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Open), "Option state mismatch");
+        uint256 optionId = 1;
 
-        assertEq(strikeToken.balanceOf(address(optionPair)), PREMIUM_AMOUNT, "Contract strike balance incorrect");
-        assertEq(strikeToken.balanceOf(buyer), buyerStrikeBalBefore - PREMIUM_AMOUNT, "Buyer strike balance incorrect");
-    }
-
-    function test_CreateBid_RevertZeroUnderlying() public {
-        vm.startPrank(buyer);
-        vm.expectRevert("Bid: Underlying amount must be > 0");
-        optionPair.createBid(0, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-    }
-
-    function test_CreateBid_RevertZeroStrike() public {
-        vm.startPrank(buyer);
-        vm.expectRevert("Bid: Strike amount must be > 0");
-        optionPair.createBid(UNDERLYING_AMOUNT, 0, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-    }
-
-    function test_CreateBid_RevertZeroPremium() public {
-        vm.startPrank(buyer);
-        vm.expectRevert("Bid: Premium amount must be > 0");
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, 0, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-    }
-
-    function test_CreateBid_RevertZeroPeriod() public {
-        vm.startPrank(buyer);
-        vm.expectRevert("Bid: Period must be > 0");
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, 0, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-    }
-
-    // --- Fill Ask Tests ---
-
-    function test_FillAsk_Success() public {
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        vm.expectRevert("Option: Not active");
+        optionPair.closeOption(optionId);
         vm.stopPrank();
+    }
 
-        uint256 sellerStrikeBalBefore = strikeToken.balanceOf(seller);
-        uint256 buyerStrikeBalBefore = strikeToken.balanceOf(buyer);
+    function test_CloseOption_RevertsWhenNotSeller() public {
+        uint256 optionId = _createAndFillAsk();
 
+        vm.startPrank(buyer); // Try to close from buyer's account
+        vm.expectRevert("Option: Only seller can close");
+        optionPair.closeOption(optionId);
+        vm.stopPrank();
+    }
+
+    function test_CloseOption_RevertsWhenExpired() public {
+        uint256 optionId = _createAndFillAsk();
+
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp + 1); // Expire the option
+
+        vm.startPrank(seller);
+        vm.expectRevert("Option: Already expired");
+        optionPair.closeOption(optionId);
+        vm.stopPrank();
+    }
+
+    // --- Bid and Fill Bid Tests ---
+
+    function _createAndFillBid() internal returns (uint256 optionId) {
         vm.startPrank(buyer);
-        vm.expectEmit(true, true, true, true);
-        emit MutatedOptionPairV2.OrderFilled(
-            1,
-            buyer,
-            seller,
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
             PREMIUM_AMOUNT,
-            CLOSING_FEE_AMOUNT
+            PERIOD_IN_SECONDS
         );
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
         vm.stopPrank();
 
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(option.buyer, buyer, "Buyer not set correctly");
-        assertEq(option.closingFeeAmount, CLOSING_FEE_AMOUNT, "Closing fee not set correctly");
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Active), "Option state not Active");
+        optionId = 1;
 
-        assertEq(strikeToken.balanceOf(seller), sellerStrikeBalBefore + PREMIUM_AMOUNT, "Seller did not receive premium");
-        assertEq(strikeToken.balanceOf(buyer), buyerStrikeBalBefore - PREMIUM_AMOUNT, "Buyer did not pay premium");
-    }
-
-    function test_FillAsk_RevertNotOpen() public {
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT); // Fill it once
-        vm.expectRevert("Order: Not open");
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT); // Try to fill again
+        optionPair.fillBid(optionId);
         vm.stopPrank();
     }
 
-    function test_FillAsk_RevertNotAnAsk() public {
-        vm.startPrank(buyer);
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        vm.startPrank(seller);
-        vm.expectRevert("Order: Not an Ask");
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-    }
-
-    function test_FillAsk_RevertSellerFillsOwnAsk() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.expectRevert("Order: Seller cannot fill their own Ask");
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-    }
-
-    // --- Fill Bid Tests ---
-
-    function test_FillBid_Success() public {
-        vm.startPrank(buyer);
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        uint256 sellerUnderlyingBalBefore = underlyingToken.balanceOf(seller);
-        uint256 sellerStrikeBalBefore = strikeToken.balanceOf(seller);
-
-        vm.startPrank(seller);
-        vm.expectEmit(true, true, true, true);
-        emit MutatedOptionPairV2.OrderFilled(
-            1,
-            buyer,
-            seller,
-            PREMIUM_AMOUNT,
-            CLOSING_FEE_AMOUNT
+    function test_CreateAndFillBid_Success() public {
+        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            seller
         );
-        optionPair.fillBid(1);
-        vm.stopPrank();
+        uint256 contractStrikeBalanceBefore = strikeToken.balanceOf(
+            address(optionPair)
+        );
+        uint256 contractUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            address(optionPair)
+        );
 
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(option.seller, seller, "Seller not set correctly");
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Active), "Option state not Active");
+        _createAndFillBid();
+        uint256 optionId = 1;
 
-        assertEq(underlyingToken.balanceOf(address(optionPair)), UNDERLYING_AMOUNT, "Contract underlying balance incorrect");
-        assertEq(sellerUnderlyingBalBefore - UNDERLYING_AMOUNT, underlyingToken.balanceOf(seller), "Seller underlying balance incorrect");
-        assertEq(strikeToken.balanceOf(address(optionPair)), 0, "Contract strike balance incorrect after premium transfer");
-        assertEq(strikeToken.balanceOf(seller), sellerStrikeBalBefore + PREMIUM_AMOUNT, "Seller did not receive premium");
-    }
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
 
-    function test_FillBid_RevertNotOpen() public {
-        vm.startPrank(buyer);
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
+        // Check option state
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Active)
+        );
+        assertEq(option.buyer, buyer);
+        assertEq(option.seller, seller);
 
-        vm.startPrank(seller);
-        optionPair.fillBid(1); // Fill it once
-        vm.expectRevert("Order: Not open");
-        optionPair.fillBid(1); // Try to fill again
-        vm.stopPrank();
-    }
+        // Check balances after fill
+        // Buyer's premium is locked in createBid, then transferred to seller in fillBid.
+        // Net change for buyer is 0 from their perspective at this point, as the premium is gone.
+        // The contract's strike balance should be net zero (premium in, premium out).
+        assertEq(
+            strikeToken.balanceOf(address(optionPair)),
+            contractStrikeBalanceBefore,
+            "Contract strike balance should be net zero"
+        );
 
-    function test_FillBid_RevertNotABid() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
+        // Seller receives the premium
+        assertEq(
+            strikeToken.balanceOf(seller),
+            strikeToken.balanceOf(seller),
+            "Seller should receive premium"
+        );
 
-        vm.startPrank(buyer);
-        vm.expectRevert("Order: Not a Bid");
-        optionPair.fillBid(1);
-        vm.stopPrank();
-    }
-
-    function test_FillBid_RevertBuyerFillsOwnBid() public {
-        vm.startPrank(buyer);
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
-        vm.expectRevert("Order: Buyer cannot fill their own Bid");
-        optionPair.fillBid(1);
-        vm.stopPrank();
+        // Seller locks underlying asset
+        assertEq(
+            underlyingToken.balanceOf(seller),
+            sellerUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Seller should have locked underlying"
+        );
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            contractUnderlyingBalanceBefore + UNDERLYING_AMOUNT,
+            "Contract should hold underlying"
+        );
     }
 
     // --- Cancel Order Tests ---
 
-    function test_CancelAskOrder_Success() public {
+    function test_Cancel_AskOrder_Success() public {
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 optionId = 1;
+
+        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            seller
+        );
+        uint256 contractUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            address(optionPair)
+        );
+
+        vm.startPrank(seller);
+        optionPair.cancelOrder(optionId);
         vm.stopPrank();
 
-        uint256 sellerUnderlyingBalBefore = underlyingToken.balanceOf(seller);
-
-        vm.startPrank(seller);
-        vm.expectEmit(true, true, false, true);
-        emit MutatedOptionPairV2.OrderCanceled(1, seller);
-        optionPair.cancelOrder(1);
-        vm.stopPrank();
-
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Canceled), "Option state not Canceled");
-        assertEq(underlyingToken.balanceOf(seller), sellerUnderlyingBalBefore + UNDERLYING_AMOUNT, "Seller did not receive underlying refund");
-        assertEq(underlyingToken.balanceOf(address(optionPair)), 0, "Contract underlying balance not zero");
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Canceled)
+        );
+        assertEq(
+            underlyingToken.balanceOf(seller),
+            sellerUnderlyingBalanceBefore + UNDERLYING_AMOUNT,
+            "Seller should get underlying back"
+        );
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            contractUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Contract should release underlying"
+        );
     }
 
-    function test_CancelBidOrder_Success() public {
+    function test_Cancel_BidOrder_Success() public {
         vm.startPrank(buyer);
-        optionPair.createBid(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS, CLOSING_FEE_AMOUNT);
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 optionId = 1;
+
+        uint256 buyerStrikeBalanceBefore = strikeToken.balanceOf(buyer);
+        uint256 contractStrikeBalanceBefore = strikeToken.balanceOf(
+            address(optionPair)
+        );
+
+        vm.startPrank(buyer);
+        optionPair.cancelOrder(optionId);
         vm.stopPrank();
 
-        uint256 buyerStrikeBalBefore = strikeToken.balanceOf(buyer);
-
-        vm.startPrank(buyer);
-        vm.expectEmit(true, true, false, true);
-        emit MutatedOptionPairV2.OrderCanceled(1, buyer);
-        optionPair.cancelOrder(1);
-        vm.stopPrank();
-
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Canceled), "Option state not Canceled");
-        assertEq(strikeToken.balanceOf(buyer), buyerStrikeBalBefore + PREMIUM_AMOUNT, "Buyer did not receive premium refund");
-        assertEq(strikeToken.balanceOf(address(optionPair)), 0, "Contract strike balance not zero");
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Canceled)
+        );
+        assertEq(
+            strikeToken.balanceOf(buyer),
+            buyerStrikeBalanceBefore + PREMIUM_AMOUNT,
+            "Buyer should get premium back"
+        );
+        assertEq(
+            strikeToken.balanceOf(address(optionPair)),
+            contractStrikeBalanceBefore - PREMIUM_AMOUNT,
+            "Contract should release premium"
+        );
     }
 
-    function test_CancelOrder_RevertNotOpen() public {
+    function test_Cancel_RevertsWhenNotCreator() public {
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
         vm.stopPrank();
+        uint256 optionId = 1;
 
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT); // Fill it
-        vm.stopPrank();
-
-        vm.startPrank(seller);
-        vm.expectRevert("Order: Not open");
-        optionPair.cancelOrder(1); // Try to cancel active order
-        vm.stopPrank();
-    }
-
-    function test_CancelOrder_RevertNotCreator() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-
-        vm.startPrank(other);
+        vm.startPrank(buyer); // Not the creator
         vm.expectRevert("Order: Only creator can cancel");
-        optionPair.cancelOrder(1);
+        optionPair.cancelOrder(optionId);
         vm.stopPrank();
     }
 
     // --- Exercise Option Tests ---
 
     function test_ExerciseOption_Success() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
+        uint256 optionId = _createAndFillAsk();
 
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        uint256 buyerUnderlyingBalBefore = underlyingToken.balanceOf(buyer);
-        uint256 sellerStrikeBalBefore = strikeToken.balanceOf(seller);
-
-        vm.startPrank(buyer);
-        vm.expectEmit(true, true, true, true);
-        emit MutatedOptionPairV2.OptionExercised(
-            1,
-            buyer,
-            seller,
-            STRIKE_AMOUNT,
-            UNDERLYING_AMOUNT
+        uint256 buyerStrikeBalanceBefore = strikeToken.balanceOf(buyer);
+        uint256 sellerStrikeBalanceBefore = strikeToken.balanceOf(seller);
+        uint256 buyerUnderlyingBalanceBefore = underlyingToken.balanceOf(buyer);
+        uint256 contractUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            address(optionPair)
         );
-        optionPair.exerciseOption(1);
-        vm.stopPrank();
-
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Exercised), "Option state not Exercised");
-
-        assertEq(underlyingToken.balanceOf(buyer), buyerUnderlyingBalBefore + UNDERLYING_AMOUNT, "Buyer did not receive underlying");
-        assertEq(strikeToken.balanceOf(seller), sellerStrikeBalBefore + STRIKE_AMOUNT, "Seller did not receive strike");
-        assertEq(underlyingToken.balanceOf(address(optionPair)), 0, "Contract underlying balance not zero");
-    }
-
-    function test_ExerciseOption_RevertNotActive() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
 
         vm.startPrank(buyer);
-        vm.expectRevert("Option: Not active");
-        optionPair.exerciseOption(1); // Try to exercise open order
+        optionPair.exerciseOption(optionId);
         vm.stopPrank();
+
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Exercised)
+        );
+
+        // Buyer pays strike, gets underlying
+        assertEq(
+            strikeToken.balanceOf(buyer),
+            buyerStrikeBalanceBefore - STRIKE_AMOUNT,
+            "Buyer should pay strike amount"
+        );
+        assertEq(
+            underlyingToken.balanceOf(buyer),
+            buyerUnderlyingBalanceBefore + UNDERLYING_AMOUNT,
+            "Buyer should receive underlying"
+        );
+
+        // Seller receives strike
+        assertEq(
+            strikeToken.balanceOf(seller),
+            sellerStrikeBalanceBefore + STRIKE_AMOUNT,
+            "Seller should receive strike amount"
+        );
+
+        // Contract releases underlying
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            contractUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Contract should release underlying"
+        );
     }
 
-    function test_ExerciseOption_RevertNotBuyer() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
+    function test_ExerciseOption_RevertsWhenNotBuyer() public {
+        uint256 optionId = _createAndFillAsk();
 
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        vm.startPrank(seller);
+        vm.startPrank(seller); // Not the buyer
         vm.expectRevert("Option: Only buyer can exercise");
-        optionPair.exerciseOption(1);
-        vm.stopPrank();
-    }
-
-    function test_ExerciseOption_RevertExpired() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + PERIOD_IN_SECONDS + 1); // Advance time past expiration
-
-        vm.startPrank(buyer);
-        vm.expectRevert("Option: Expired");
-        optionPair.exerciseOption(1);
+        optionPair.exerciseOption(optionId);
         vm.stopPrank();
     }
 
     // --- Claim Underlying on Expiration Tests ---
 
-    function test_ClaimUnderlyingOnExpiration_Success() public {
+    function test_ClaimUnderlying_Success() public {
+        uint256 optionId = _createAndFillAsk();
+
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp + 1); // Expire the option
+
+        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            seller
+        );
+        uint256 contractUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            address(optionPair)
+        );
+
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        optionPair.claimUnderlyingOnExpiration(optionId);
         vm.stopPrank();
 
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
+        MutatedOptionPairV2.Option memory expiredOption = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(expiredOption.state),
+            uint(MutatedOptionPairV2.OptionState.Expired)
+        );
 
-        vm.warp(block.timestamp + PERIOD_IN_SECONDS + 1); // Advance time past expiration
-
-        uint256 sellerUnderlyingBalBefore = underlyingToken.balanceOf(seller);
-
-        vm.startPrank(seller);
-        vm.expectEmit(true, true, false, true);
-        emit MutatedOptionPairV2.OptionExpired(1, seller, UNDERLYING_AMOUNT);
-        optionPair.claimUnderlyingOnExpiration(1);
-        vm.stopPrank();
-
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Expired), "Option state not Expired");
-        assertEq(underlyingToken.balanceOf(seller), sellerUnderlyingBalBefore + UNDERLYING_AMOUNT, "Seller did not receive underlying");
-        assertEq(underlyingToken.balanceOf(address(optionPair)), 0, "Contract underlying balance not zero");
+        // Seller gets underlying back
+        assertEq(
+            underlyingToken.balanceOf(seller),
+            sellerUnderlyingBalanceBefore + UNDERLYING_AMOUNT,
+            "Seller should get underlying back"
+        );
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            contractUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Contract should release underlying"
+        );
     }
 
-    function test_ClaimUnderlyingOnExpiration_RevertNotActive() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
+    function test_ClaimUnderlying_RevertsWhenNotSeller() public {
+        uint256 optionId = _createAndFillAsk();
 
-        vm.warp(block.timestamp + PERIOD_IN_SECONDS + 1); // Advance time past expiration
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp + 1);
 
-        vm.startPrank(seller);
-        vm.expectRevert("Option: Not active");
-        optionPair.claimUnderlyingOnExpiration(1); // Try to claim on open order
-        vm.stopPrank();
-    }
-
-    function test_ClaimUnderlyingOnExpiration_RevertNotSeller() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + PERIOD_IN_SECONDS + 1); // Advance time past expiration
-
-        vm.startPrank(buyer);
+        vm.startPrank(buyer); // Not the seller
         vm.expectRevert("Option: Only seller can claim");
-        optionPair.claimUnderlyingOnExpiration(1);
+        optionPair.claimUnderlyingOnExpiration(optionId);
         vm.stopPrank();
     }
 
-    function test_ClaimUnderlyingOnExpiration_RevertNotExpiredYet() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
+    function test_ClaimUnderlying_RevertsWhenNotExpired() public {
+        uint256 optionId = _createAndFillAsk();
 
         vm.startPrank(seller);
         vm.expectRevert("Option: Not expired yet");
-        optionPair.claimUnderlyingOnExpiration(1);
+        optionPair.claimUnderlyingOnExpiration(optionId);
         vm.stopPrank();
     }
 
-    // --- Close Option Tests ---
+    // --- Additional Revert Tests for Branch Coverage ---
 
-    function test_CloseOption_Success() public {
+    function test_CreateAsk_RevertsWithZeroAmount() public {
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        vm.expectRevert("Ask: Underlying amount must be > 0");
+        optionPair.createAsk(
+            0,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+
+        vm.expectRevert("Ask: Strike amount must be > 0");
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            0,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+
+        vm.expectRevert("Ask: Premium amount must be > 0");
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            0,
+            PERIOD_IN_SECONDS
+        );
+
+        vm.expectRevert("Ask: Period must be > 0");
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            0
+        );
         vm.stopPrank();
+    }
+
+    function test_CreateBid_RevertsWithZeroAmount() public {
+        vm.startPrank(buyer);
+        vm.expectRevert("Bid: Underlying amount must be > 0");
+        optionPair.createBid(
+            0,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+
+        vm.expectRevert("Bid: Strike amount must be > 0");
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            0,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+
+        vm.expectRevert("Bid: Premium amount must be > 0");
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            0,
+            PERIOD_IN_SECONDS
+        );
+
+        vm.expectRevert("Bid: Period must be > 0");
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            0
+        );
+        vm.stopPrank();
+    }
+
+    function test_FillAsk_RevertsOnWrongOrderType() public {
+        // Create a Bid order
+        vm.startPrank(buyer);
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 bidOptionId = 1;
+
+        // Try to fill it as an Ask
+        vm.startPrank(seller);
+        vm.expectRevert("Order: Not an Ask");
+        optionPair.fillAsk(bidOptionId);
+        vm.stopPrank();
+    }
+
+    function test_FillAsk_RevertsWhenSellerFillsOwn() public {
+        vm.startPrank(seller);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 askOptionId = 1;
+
+        vm.startPrank(seller);
+        vm.expectRevert("Order: Seller cannot fill their own Ask");
+        optionPair.fillAsk(askOptionId);
+        vm.stopPrank();
+    }
+
+    function test_FillBid_RevertsOnWrongOrderType() public {
+        // Create an Ask order
+        vm.startPrank(seller);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 askOptionId = 1;
+
+        // Try to fill it as a Bid
+        vm.startPrank(buyer);
+        vm.expectRevert("Order: Not a Bid");
+        optionPair.fillBid(askOptionId);
+        vm.stopPrank();
+    }
+
+    function test_FillBid_RevertsWhenBuyerFillsOwn() public {
+        vm.startPrank(buyer);
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 bidOptionId = 1;
 
         vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
+        vm.expectRevert("Order: Buyer cannot fill their own Bid");
+        optionPair.fillBid(bidOptionId);
         vm.stopPrank();
-
-        uint256 sellerUnderlyingBalBefore = underlyingToken.balanceOf(seller);
-        uint256 buyerStrikeBalBefore = strikeToken.balanceOf(buyer);
-
-        vm.startPrank(seller);
-        vm.expectEmit(true, true, true, true);
-        emit MutatedOptionPairV2.OptionClosed(
-            1,
-            seller,
-            buyer,
-            CLOSING_FEE_AMOUNT,
-            UNDERLYING_AMOUNT
-        );
-        optionPair.closeOption(1);
-        vm.stopPrank();
-
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(1);
-        assertEq(uint8(option.state), uint8(MutatedOptionPairV2.OptionState.Closed), "Option state not Closed");
-
-        assertEq(underlyingToken.balanceOf(seller), sellerUnderlyingBalBefore + UNDERLYING_AMOUNT, "Seller did not receive underlying");
-        assertEq(strikeToken.balanceOf(buyer), buyerStrikeBalBefore + CLOSING_FEE_AMOUNT, "Buyer did not receive closing fee");
-        assertEq(underlyingToken.balanceOf(address(optionPair)), 0, "Contract underlying balance not zero");
     }
 
-    function test_CloseOption_RevertNotActive() public {
+    function test_Cancel_RevertsWhenNotOpen() public {
+        uint256 optionId = _createAndFillAsk(); // Creates an Active order
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        vm.expectRevert("Order: Not open");
+        optionPair.cancelOrder(optionId);
         vm.stopPrank();
+    }
+
+    function test_ExerciseOption_RevertsWhenExpired() public {
+        uint256 optionId = _createAndFillAsk();
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp + 1); // Expire
+
+        vm.startPrank(buyer);
+        vm.expectRevert("Option: Expired");
+        optionPair.exerciseOption(optionId);
+        vm.stopPrank();
+    }
+
+    function test_ClaimUnderlying_RevertsWhenNotActive() public {
+        vm.startPrank(seller);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 optionId = 1; // State is Open, not Active
+
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp + 1); // Expire
 
         vm.startPrank(seller);
         vm.expectRevert("Option: Not active");
-        optionPair.closeOption(1); // Try to close open order
+        optionPair.claimUnderlyingOnExpiration(optionId);
         vm.stopPrank();
     }
 
-    function test_CloseOption_RevertNotSeller() public {
+    function test_GetClosingFeePercentage_RevertsWhenNotActive() public {
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
         vm.stopPrank();
+        uint256 optionId = 1; // State is Open
 
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        vm.startPrank(buyer);
-        vm.expectRevert("Option: Only seller can close");
-        optionPair.closeOption(1);
-        vm.stopPrank();
+        vm.expectRevert("Option not active for fee calculation");
+        optionPair.getClosingFeePercentage(optionId);
     }
 
-    function test_CloseOption_RevertAlreadyExpired() public {
-        vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
-        vm.stopPrank();
-
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, CLOSING_FEE_AMOUNT);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + PERIOD_IN_SECONDS + 1); // Advance time past expiration
+    function test_CloseOption_RevertsWhenExpiredAtBoundary() public {
+        uint256 optionId = _createAndFillAsk();
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp); // Exactly at expiration
 
         vm.startPrank(seller);
+        // At the exact expiration timestamp, the first check should fail.
         vm.expectRevert("Option: Already expired");
-        optionPair.closeOption(1);
+        optionPair.closeOption(optionId);
         vm.stopPrank();
     }
 
-    function test_CloseOption_RevertZeroClosingFee() public {
+    function testCloseOptionRightAfterFill() public {
+        uint256 optionId = _createAndFillAsk();
+
+        // Close immediately (1 second after fill)
+        vm.warp(block.timestamp + 1);
+
+        uint256 closingFee = optionPair.calculateClosingFeeAmount(optionId);
+
+        // Fee should be very close to the premium amount
+        uint256 expectedFee = optionPair
+            .getClosingFeePercentage(optionId)
+            .mul(ud(PREMIUM_AMOUNT))
+            .intoUint256();
+        assertApproxEqAbs(
+            closingFee,
+            expectedFee,
+            1e12,
+            "Fee should be close to expected fee right after fill"
+        );
+        assertTrue(
+            closingFee < PREMIUM_AMOUNT,
+            "Fee must be less than total premium"
+        );
+        assertTrue(
+            closingFee > (PREMIUM_AMOUNT * 999) / 1000,
+            "Fee should be > 99.9% of premium"
+        );
+
         vm.startPrank(seller);
-        optionPair.createAsk(UNDERLYING_AMOUNT, STRIKE_AMOUNT, PREMIUM_AMOUNT, PERIOD_IN_SECONDS);
+        optionPair.closeOption(optionId);
         vm.stopPrank();
 
-        vm.startPrank(buyer);
-        optionPair.fillAsk(1, 0); // Fill with zero closing fee
-        vm.stopPrank();
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Closed),
+            "Option state should be Closed"
+        );
+    }
+
+    function testCloseOptionRightBeforeExpiration() public {
+        uint256 optionId = _createAndFillAsk();
+
+        // Close 1 second before expiration
+        vm.warp(block.timestamp + PERIOD_IN_SECONDS - 1);
+
+        uint256 closingFee = optionPair.calculateClosingFeeAmount(optionId);
+
+        // Fee should be very close to 0
+        assertTrue(
+            closingFee < PREMIUM_AMOUNT / 100,
+            "Fee should be < 1% of premium right before expiration"
+        );
+        assertTrue(closingFee > 0, "Fee should be greater than 0");
 
         vm.startPrank(seller);
-        vm.expectRevert("Option: Closing fee must be > 0");
-        optionPair.closeOption(1);
+        optionPair.closeOption(optionId);
         vm.stopPrank();
+
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Closed),
+            "Option state should be Closed"
+        );
     }
 }

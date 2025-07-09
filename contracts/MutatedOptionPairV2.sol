@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
 
 /**
  * @title MutatedOptionPair
@@ -45,7 +46,8 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         uint256 strikeAmount;
         uint256 premiumAmount;
         uint256 expirationTimestamp;
-        uint256 closingFeeAmount;
+        uint256 createTimestamp;
+        uint256 totalPeriodSeconds;
         OrderType orderType;
         OptionState state;
     }
@@ -78,8 +80,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         uint256 indexed optionId,
         address indexed buyer,
         address indexed seller,
-        uint256 premiumAmount,
-        uint256 closingFeeAmount
+        uint256 premiumAmount
     );
 
     event OrderCanceled(uint256 indexed optionId, address indexed creator);
@@ -150,7 +151,8 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             strikeAmount: _strikeAmount,
             premiumAmount: _premiumAmount,
             expirationTimestamp: expiration,
-            closingFeeAmount: 0,
+            createTimestamp: 0,
+            totalPeriodSeconds: _periodInSeconds,
             orderType: OrderType.Ask,
             state: OptionState.Open
         });
@@ -174,8 +176,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         uint256 _underlyingAmount,
         uint256 _strikeAmount,
         uint256 _premiumAmount,
-        uint256 _periodInSeconds,
-        uint256 _closingFeeAmount
+        uint256 _periodInSeconds
     ) external nonReentrant {
         require(_underlyingAmount > 0, "Bid: Underlying amount must be > 0");
         require(_strikeAmount > 0, "Bid: Strike amount must be > 0");
@@ -201,7 +202,8 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             strikeAmount: _strikeAmount,
             premiumAmount: _premiumAmount,
             expirationTimestamp: expiration,
-            closingFeeAmount: _closingFeeAmount,
+            createTimestamp: 0,
+            totalPeriodSeconds: _periodInSeconds,
             orderType: OrderType.Bid,
             state: OptionState.Open
         });
@@ -223,10 +225,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
      * @dev A buyer fills a seller's "Ask" order.
      * The buyer must approve the contract to transfer the premium.
      */
-    function fillAsk(
-        uint256 _optionId,
-        uint256 _closingFeeAmount
-    ) external nonReentrant {
+    function fillAsk(uint256 _optionId) external nonReentrant {
         Option storage option = options[_optionId];
         require(option.state == OptionState.Open, "Order: Not open");
         require(option.orderType == OrderType.Ask, "Order: Not an Ask");
@@ -237,8 +236,11 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
 
         // State update
         option.buyer = payable(msg.sender);
-        option.closingFeeAmount = _closingFeeAmount;
         option.state = OptionState.Active;
+        option.createTimestamp = block.timestamp;
+        option.expirationTimestamp =
+            block.timestamp +
+            option.totalPeriodSeconds;
 
         // Premium transfer from buyer to seller
         IERC20(strikeToken).safeTransferFrom(
@@ -251,8 +253,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             _optionId,
             msg.sender,
             option.seller,
-            option.premiumAmount,
-            _closingFeeAmount
+            option.premiumAmount
         );
     }
 
@@ -272,6 +273,10 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         // State update
         option.seller = payable(msg.sender);
         option.state = OptionState.Active;
+        option.createTimestamp = block.timestamp;
+        option.expirationTimestamp =
+            block.timestamp +
+            option.totalPeriodSeconds;
 
         // Seller locks the underlying asset
         IERC20(underlyingToken).safeTransferFrom(
@@ -287,8 +292,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             _optionId,
             option.buyer,
             msg.sender,
-            option.premiumAmount,
-            option.closingFeeAmount
+            option.premiumAmount
         );
     }
 
@@ -394,7 +398,13 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             block.timestamp < option.expirationTimestamp,
             "Option: Already expired"
         );
-        require(option.closingFeeAmount > 0, "Option: Closing fee must be > 0");
+        require(
+            option.buyer != address(0),
+            "Option: Has not been purchased yet"
+        );
+
+        uint256 closingFee = calculateClosingFeeAmount(_optionId);
+        require(closingFee > 0, "Option: Calculated closing fee must be > 0");
 
         option.state = OptionState.Closed;
 
@@ -402,7 +412,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         IERC20(strikeToken).safeTransferFrom(
             msg.sender,
             option.buyer,
-            option.closingFeeAmount
+            closingFee
         );
 
         // Underlying tokens are returned to seller
@@ -415,8 +425,72 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             _optionId,
             msg.sender,
             option.buyer,
-            option.closingFeeAmount,
+            closingFee,
             option.underlyingAmount
         );
+    }
+
+    /// @dev Calculates the closing fee percentage based on the formula Y = 1 - (1 - X)^2,
+    ///      where X = remaining time / total contract time.
+    /// @param _optionId The ID of the option.
+    /// @return calculatedFeePercent The calculated closing fee percentage (in UD60x18 format).
+    function getClosingFeePercentage(
+        uint256 _optionId
+    ) public view returns (UD60x18 calculatedFeePercent) {
+        Option storage option = options[_optionId];
+
+        // Ensure the option is active to calculate the closing fee
+        require(
+            option.state == OptionState.Active,
+            "Option not active for fee calculation"
+        );
+
+        uint256 remainingTime;
+        if (option.expirationTimestamp <= block.timestamp) {
+            remainingTime = 0; // Expired or past due
+        } else {
+            remainingTime = option.expirationTimestamp - block.timestamp;
+        }
+
+        // Handle edge cases: if total period is zero or time has run out, the fee percentage is 0
+        if (option.totalPeriodSeconds == 0 || remainingTime == 0) {
+            return ud(0); // Return 0
+        }
+
+        // Calculate X = remainingTime / totalPeriodSeconds
+        // Convert uint256 to UD60x18 for the division
+        UD60x18 x_ud = ud(remainingTime).div(ud(option.totalPeriodSeconds));
+
+        // Step 1: Calculate (1 - X)
+        // Ensure that x_ud does not exceed UD60x18.ONE to prevent underflow in UD60x18.sub
+        // If remainingTime > totalPeriodSeconds, this would mean X > 1.
+        // Given the logic, remainingTime should always be <= totalPeriodSeconds for an active option.
+        UD60x18 oneMinusX = UD60x18.wrap(1e18).sub(x_ud);
+
+        // Step 2: Calculate (1 - X)^2
+        UD60x18 oneMinusX_squared = oneMinusX.mul(oneMinusX);
+
+        // Step 3: Calculate 1 - (1 - X)^2
+        calculatedFeePercent = UD60x18.wrap(1e18).sub(oneMinusX_squared);
+
+        return calculatedFeePercent;
+    }
+
+    /// @dev Calculates the closing fee amount the seller needs to pay for an early close.
+    /// @param _optionId The ID of the option.
+    /// @return closingFeeAmount The final closing fee amount.
+    function calculateClosingFeeAmount(
+        uint256 _optionId
+    ) public view returns (uint256 closingFeeAmount) {
+        Option storage option = options[_optionId];
+
+        // Get the closing fee percentage (in UD60x18 format)
+        UD60x18 feePercent = getClosingFeePercentage(_optionId);
+
+        // Convert premiumAmount to UD60x18, then multiply by feePercent
+        UD60x18 premiumAmount_ud = ud(option.premiumAmount);
+        closingFeeAmount = premiumAmount_ud.mul(feePercent).intoUint256();
+
+        return closingFeeAmount;
     }
 }
