@@ -11,7 +11,7 @@ const DeployP2PAndTokensModule = buildModule("DeployP2PAndTokensModule", (m) => 
     id: "TokenA",
     from: deployer,
   });
-  const tokenB = m.contract("TestToken", ["Token B", "TKB", initialSupply], {
+  const tokenB = m.contract("TestToken", ["Token B", "TKB", initialSupply, 18], {
     id: "TokenB",
     from: deployer,
   });

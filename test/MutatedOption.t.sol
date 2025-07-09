@@ -21,12 +21,14 @@ contract MutatedOptionTest is Test {
         underlyingToken = new TestToken(
             "Underlying Token",
             "UND",
-            INITIAL_TOKEN_BALANCE
+            INITIAL_TOKEN_BALANCE,
+            18
         );
         strikeToken = new TestToken(
             "Strike Token",
             "STK",
-            INITIAL_TOKEN_BALANCE
+            INITIAL_TOKEN_BALANCE,
+            18
         );
 
         seller = makeAddr("seller");

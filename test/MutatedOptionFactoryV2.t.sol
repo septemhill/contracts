@@ -19,9 +19,9 @@ contract MutatedOptionFactoryV2Test is Test {
 
         vm.startPrank(deployer);
         factory = new MutatedOptionFactoryV2();
-        tokenA = new TestToken("TokenA", "TKA", 1_000_000e18);
-        tokenB = new TestToken("TokenB", "TKB", 1_000_000e18);
-        tokenC = new TestToken("TokenC", "TKC", 1_000_000e18);
+        tokenA = new TestToken("TokenA", "TKA", 1_000_000e18, 18);
+        tokenB = new TestToken("TokenB", "TKB", 1_000_000e18, 18);
+        tokenC = new TestToken("TokenC", "TKC", 1_000_000e18, 18);
         vm.stopPrank();
     }
 

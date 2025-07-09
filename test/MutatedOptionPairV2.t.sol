@@ -27,9 +27,10 @@ contract MutatedOptionPairV2Test is Test {
         underlyingToken = new TestToken(
             "Underlying Token",
             "ULT",
-            INITIAL_SUPPLY
+            INITIAL_SUPPLY,
+            18
         );
-        strikeToken = new TestToken("Strike Token", "STK", INITIAL_SUPPLY);
+        strikeToken = new TestToken("Strike Token", "STK", INITIAL_SUPPLY, 18);
 
         optionPair = new MutatedOptionPairV2(
             address(underlyingToken),

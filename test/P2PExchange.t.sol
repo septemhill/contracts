@@ -18,8 +18,8 @@ contract P2PExchangeTest is Test {
 
     function setUp() public {
         exchange = new P2PExchange();
-        tokenA = new TestToken("Token A", "TKA", INITIAL_TOKEN_AMOUNT);
-        tokenB = new TestToken("Token B", "TKB", INITIAL_TOKEN_AMOUNT);
+        tokenA = new TestToken("Token A", "TKA", INITIAL_TOKEN_AMOUNT, 18);
+        tokenB = new TestToken("Token B", "TKB", INITIAL_TOKEN_AMOUNT, 18);
 
         // Distribute tokens to maker and taker
         tokenA.transfer(MAKER, TEST_SEND_AMOUNT);

@@ -30,9 +30,10 @@ contract MutatedOptionFactoryTest is Test {
         underlyingToken = new TestToken(
             "Underlying Token",
             "ULT",
-            initialMintAmount
+            initialMintAmount,
+            18
         );
-        strikeToken = new TestToken("Strike Token", "STK", initialMintAmount);
+        strikeToken = new TestToken("Strike Token", "STK", initialMintAmount, 18);
         vm.stopPrank();
 
         // Mint tokens for the buyer as well
