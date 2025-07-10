@@ -121,7 +121,7 @@ When a seller chooses to close an active option early using `closeOption`, a clo
     *   `Y`: The calculated closing fee percentage (returned by `getClosingFeePercentage`).
     *   The final `closingFeeAmount` is `Y * premiumAmount` (returned by `calculateClosingFeeAmount`).
 *   **Recipient**: The calculated `closingFeeAmount` is paid by the seller directly to the buyer.
-*   **Rationale**: This formula implies that the closer the option is to expiration, the lower the closing fee, as `X` approaches 0, `(1-X)^2` approaches 1, and `Y` approaches 0. Conversely, closing very early (large `X`) results in a higher fee.
+*   **Rationale**: This formula implies that the closer the option is to expiration, the lower the closing fee, as `X` approaches 0, `(1-X)^2` approaches 1, and `Y` approaches 0. Conversely, closing very early (large `X`) results in a higher fee. This mechanism is designed to prevent arbitrage opportunities that could arise from immediately closing an option after it has been filled.
 
 ## 4. Important Considerations and Avoiding Gas Waste
 
