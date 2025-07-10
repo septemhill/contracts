@@ -11,7 +11,8 @@ contract FeeCalculatorTest is Test {
     FeeCalculator public feeCalculator;
     TestToken public tokenA;
     TestToken public tokenB;
-    TestToken public tokenC; // Add a third token for more robust testing
+    TestToken public tokenC;
+    TestToken public tokenD;
     address public owner;
     address public user;
     address public feeRecipient;
@@ -24,10 +25,11 @@ contract FeeCalculatorTest is Test {
 
         vm.startPrank(owner);
         feeCalculator = new FeeCalculator(owner, feeRecipient);
-        // Using common decimals for easier testing, e.g., 18 for most ERC20s
+        // Using common decimals for easier testing
         tokenA = new TestToken("Token A", "TKA", 1_000_000e18, 18);
-        tokenB = new TestToken("Token B", "TKB", 1_000_000e18, 18);
-        tokenC = new TestToken("Token C", "TKC", 1_000_000e18, 18); // Initialize the new token
+        tokenB = new TestToken("Token B", "TKB", 1_000_000e6, 6);
+        tokenC = new TestToken("Token C", "TKC", 1_000_000e8, 8);
+        tokenD = new TestToken("Token D", "TKD", 1_000_000e9, 9);
         vm.stopPrank();
     }
 
@@ -56,18 +58,66 @@ contract FeeCalculatorTest is Test {
     function test_CalculateFee() public {
         vm.startPrank(owner);
         // Set fee rate to 0.5%
-        UD60x18 feeRate = ud(0.005e18); // 0.5%
-        feeCalculator.setFeeRate(address(tokenA), feeRate);
+        UD60x18 feeRateA = ud(0.005e18); // 0.5%
+        feeCalculator.setFeeRate(address(tokenA), feeRateA);
         vm.stopPrank();
 
-        uint256 amount = 1000e18; // Use 18 decimals for consistency
-        uint256 expectedFee = ud(amount).mul(feeRate).intoUint256();
-        uint256 actualFee = feeCalculator.getFee(address(tokenA), amount);
+        uint256 amountA = 1000e18;
+        uint256 expectedFeeA = ud(amountA).mul(feeRateA).intoUint256();
+        uint256 actualFeeA = feeCalculator.getFee(address(tokenA), amountA);
 
         assertEq(
-            actualFee,
-            expectedFee,
-            "Fee calculation is incorrect for supported token"
+            actualFeeA,
+            expectedFeeA,
+            "Fee calculation is incorrect for tokenA"
+        );
+
+        vm.startPrank(owner);
+        // Set fee rate to 1%
+        UD60x18 feeRateB = ud(0.01e18); // 1%
+        feeCalculator.setFeeRate(address(tokenB), feeRateB);
+        vm.stopPrank();
+
+        uint256 amountB = 1000e6;
+        uint256 expectedFeeB = ud(amountB).mul(feeRateB).intoUint256();
+        uint256 actualFeeB = feeCalculator.getFee(address(tokenB), amountB);
+
+        assertEq(
+            actualFeeB,
+            expectedFeeB,
+            "Fee calculation is incorrect for tokenB"
+        );
+
+        vm.startPrank(owner);
+        // Set fee rate to 0.25%
+        UD60x18 feeRateC = ud(0.0025e18); // 0.25%
+        feeCalculator.setFeeRate(address(tokenC), feeRateC);
+        vm.stopPrank();
+
+        uint256 amountC = 1000e8;
+        uint256 expectedFeeC = ud(amountC).mul(feeRateC).intoUint256();
+        uint256 actualFeeC = feeCalculator.getFee(address(tokenC), amountC);
+
+        assertEq(
+            actualFeeC,
+            expectedFeeC,
+            "Fee calculation is incorrect for tokenC"
+        );
+
+        vm.startPrank(owner);
+        // Set fee rate to 0.75%
+        UD60x18 feeRateD = ud(0.0075e18); // 0.75%
+        feeCalculator.setFeeRate(address(tokenD), feeRateD);
+        vm.stopPrank();
+
+        uint256 amountD = 1000e9;
+        uint256 expectedFeeD = ud(amountD).mul(feeRateD).intoUint256();
+        uint256 actualFeeD = feeCalculator.getFee(address(tokenD), amountD);
+
+        assertEq(
+            actualFeeD,
+            expectedFeeD,
+            "Fee calculation is incorrect for tokenD"
         );
     }
 
