@@ -14,14 +14,16 @@ contract FeeCalculatorTest is Test {
     TestToken public tokenC; // Add a third token for more robust testing
     address public owner;
     address public user;
+    address public feeRecipient;
     address public zeroAddress = address(0);
 
     function setUp() public {
         owner = makeAddr("owner");
         user = makeAddr("user");
+        feeRecipient = makeAddr("feeRecipient");
 
         vm.startPrank(owner);
-        feeCalculator = new FeeCalculator(owner);
+        feeCalculator = new FeeCalculator(owner, feeRecipient);
         // Using common decimals for easier testing, e.g., 18 for most ERC20s
         tokenA = new TestToken("Token A", "TKA", 1_000_000e18, 18);
         tokenB = new TestToken("Token B", "TKB", 1_000_000e18, 18);
@@ -246,6 +248,55 @@ contract FeeCalculatorTest is Test {
         emit FeeCalculator.FeeRateSet(address(tokenB), ud(0)); // Expect rate to be set to 0
         emit FeeCalculator.TokenSupportToggled(address(tokenB), false); // Expect support to be toggled to false
         feeCalculator.removeTokenSupport(address(tokenB)); // This call triggers the events
+        vm.stopPrank();
+    }
+
+    function test_UpdateFeeRecipient_Success() public {
+        address newRecipient = makeAddr("newRecipient");
+
+        vm.startPrank(owner);
+        vm.expectEmit(true, true, true, false);
+        emit FeeCalculator.FeeRecipientUpdated(feeRecipient, newRecipient);
+        feeCalculator.updateFeeRecipient(newRecipient);
+        vm.stopPrank();
+
+        assertEq(
+            feeCalculator.feeRecipient(),
+            newRecipient,
+            "Fee recipient should be updated"
+        );
+    }
+
+    function test_UpdateFeeRecipient_RevertsIfNotOwner() public {
+        address newRecipient = makeAddr("newRecipient");
+
+        vm.startPrank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                user
+            )
+        );
+        feeCalculator.updateFeeRecipient(newRecipient);
+        vm.stopPrank();
+    }
+
+    function test_UpdateFeeRecipient_RevertsIfZeroAddress() public {
+        vm.startPrank(owner);
+        vm.expectRevert(
+            "FeeCalculator: Fee receiving address cannot be zero address"
+        );
+        feeCalculator.updateFeeRecipient(address(0));
+        vm.stopPrank();
+    }
+
+    function test_EventsEmitted_UpdateFeeRecipient() public {
+        address newRecipient = makeAddr("newRecipient");
+
+        vm.startPrank(owner);
+        vm.expectEmit(true, true, true, false);
+        emit FeeCalculator.FeeRecipientUpdated(feeRecipient, newRecipient);
+        feeCalculator.updateFeeRecipient(newRecipient);
         vm.stopPrank();
     }
 }

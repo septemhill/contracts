@@ -25,14 +25,33 @@ contract FeeCalculator is Ownable {
      */
     mapping(address => bool) public supportedTokens;
 
+    /**
+     * @notice The address that will receive the fees.
+     */
+    address payable public feeRecipient;
+
     event FeeRateSet(address indexed token, UD60x18 newRate);
     event TokenSupportToggled(address indexed token, bool isSupported);
+    event FeeRecipientUpdated(
+        address indexed oldRecipient,
+        address indexed newAddress
+    );
 
     /**
-     * @notice Initializes the contract, setting the deployer as the initial owner.
+     * @notice Initializes the contract, setting the deployer as the initial owner and the fee receiving address.
      * @param initialOwner The address of the initial owner.
+     * @param initialFeeRecipient The address that will receive the fees.
      */
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    constructor(
+        address initialOwner,
+        address initialFeeRecipient
+    ) Ownable(initialOwner) {
+        require(
+            initialFeeRecipient != address(0),
+            "FeeCalculator: Fee receiving address cannot be zero address"
+        );
+        feeRecipient = payable(initialFeeRecipient);
+    }
 
     /**
      * @notice Sets the fee rate for a specific token and adds it to the supported list.
@@ -108,5 +127,18 @@ contract FeeCalculator is Ownable {
         }
         // Convert amount to UD60x18, multiply by the rate, and convert back to uint256.
         return ud(amount).mul(rate).intoUint256();
+    }
+
+    /**
+     * @notice Updates the fee receiving address.
+     * @param _newAddress The new address that will receive the fees.
+     */
+    function updateFeeRecipient(address _newAddress) external onlyOwner {
+        require(
+            _newAddress != address(0),
+            "FeeCalculator: Fee receiving address cannot be zero address"
+        );
+        emit FeeRecipientUpdated(feeRecipient, _newAddress);
+        feeRecipient = payable(_newAddress);
     }
 }
