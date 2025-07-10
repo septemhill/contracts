@@ -1,0 +1,27 @@
+
+option_state_machine: {
+    Open: {
+        shape: circle
+    }
+    Active: {
+        shape: circle
+    }
+    Exercised: {
+        shape: circle
+    }
+    Expired: {
+        shape: circle
+    }
+    Closed: {
+        shape: circle
+    }
+    Canceled: {
+        shape: circle
+    }
+
+    Open -> Active: fillAsk / fillBid
+    Open -> Canceled: cancelOrder
+    Active -> Exercised: exerciseOption
+    Active -> Expired: claimUnderlyingOnExpiration
+    Active -> Closed: closeOption
+}

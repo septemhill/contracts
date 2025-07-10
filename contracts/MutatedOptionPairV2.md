@@ -30,6 +30,24 @@ This document provides a detailed explanation of the `MutatedOptionPairV2` smart
 
 Each option/order is represented by an `Option` struct, containing details such as `optionId`, `creator`, `seller`, `buyer`, `underlyingAmount`, `strikeAmount`, `premiumAmount`, `expirationTimestamp`, `createTimestamp`, `totalPeriodSeconds`, `orderType`, and `state`.
 
+### Option State Machine
+
+The lifecycle of an option within the `MutatedOptionPairV2` contract is governed by its `OptionState`. The state transitions are as follows:
+
+*   **`Open`**: The initial state when an order (Bid or Ask) is created and awaiting a counterparty.
+    *   Transitions to `Active` when `fillAsk` or `fillBid` is called.
+    *   Transitions to `Canceled` if the creator calls `cancelOrder`.
+*   **`Active`**: The option becomes active once an `Open` order is filled. It can now be exercised or closed.
+    *   Transitions to `Exercised` when the buyer calls `exerciseOption`.
+    *   Transitions to `Expired` if the seller calls `claimUnderlyingOnExpiration` after the `expirationTimestamp` has passed.
+    *   Transitions to `Closed` if the seller calls `closeOption` early.
+*   **`Exercised`**: The final state after the buyer successfully exercises the option.
+*   **`Expired`**: The final state if the option's expiration timestamp passes without being exercised, and the seller reclaims the underlying asset.
+*   **`Closed`**: The final state if the seller closes the option early.
+*   **`Canceled`**: The final state if an `Open` order is canceled by its creator.
+
+For a visual representation of these state transitions, please refer to the [Option State Machine Diagram](../charts/MutatedOptionPairV2_state_machine.svg).
+
 ## 2. Workflows and Transaction Flows
 
 ### 2.1. Order Creation
