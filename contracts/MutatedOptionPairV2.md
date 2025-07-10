@@ -46,7 +46,9 @@ The lifecycle of an option within the `MutatedOptionPairV2` contract is governed
 *   **`Closed`**: The final state if the seller closes the option early.
 *   **`Canceled`**: The final state if an `Open` order is canceled by its creator.
 
-For a visual representation of these state transitions, please refer to the [Option State Machine Diagram](../charts/MutatedOptionPairV2_state_machine.svg).
+For a visual representation of these state transitions:
+
+![Option State Machine Diagram](../charts/MutatedOptionPairV2_state_machine.svg)
 
 ## 2. Workflows and Transaction Flows
 
