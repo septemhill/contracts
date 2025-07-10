@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
+import {FeeCalculator} from "./FeeCalculator.sol";
 
 /**
  * @title MutatedOptionPair
@@ -254,19 +255,32 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             block.timestamp +
             option.totalPeriodSeconds;
 
-        // Premium transfer from buyer to seller
+        // Calculate fee
+        FeeCalculator feeCal = FeeCalculator(feeCalculator);
+        uint256 fee = feeCal.getFee(strikeToken, option.premiumAmount);
+        address feeRecipient = feeCal.feeRecipient();
+
+        // Ensure premium is sufficient to pay the fee
+        require(
+            option.premiumAmount >= fee,
+            "Premium amount is insufficient to pay the fee"
+        );
+
+        // Deduct fee from premium amount
+        uint256 premiumToSeller = option.premiumAmount - fee;
+
+        // Transfer the full premium from the buyer to this contract first.
         IERC20(strikeToken).safeTransferFrom(
             msg.sender,
-            option.seller,
+            address(this),
             option.premiumAmount
         );
 
-        emit OrderFilled(
-            _optionId,
-            msg.sender,
-            option.seller,
-            option.premiumAmount
-        );
+        // From the contract's balance, send the fee to the recipient and the rest to the seller.
+        IERC20(strikeToken).safeTransfer(feeRecipient, fee);
+        IERC20(strikeToken).safeTransfer(option.seller, premiumToSeller);
+
+        emit OrderFilled(_optionId, msg.sender, option.seller, premiumToSeller);
     }
 
     /**
@@ -297,15 +311,27 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
             option.underlyingAmount
         );
 
-        // Premium (already locked in contract) is transferred to seller
-        IERC20(strikeToken).safeTransfer(option.seller, option.premiumAmount);
+        // Calculate fee
+        FeeCalculator feeCal = FeeCalculator(feeCalculator);
+        uint256 fee = feeCal.getFee(strikeToken, option.premiumAmount);
+        address feeRecipient = feeCal.feeRecipient();
 
-        emit OrderFilled(
-            _optionId,
-            option.buyer,
-            msg.sender,
-            option.premiumAmount
+        // Ensure premium is sufficient to pay the fee
+        require(
+            option.premiumAmount >= fee,
+            "Premium amount is insufficient to pay the fee"
         );
+
+        // Deduct fee from premium amount
+        uint256 premiumToSeller = option.premiumAmount - fee;
+
+        // Transfer fee to fee recipient
+        IERC20(strikeToken).safeTransfer(feeRecipient, fee);
+
+        // Premium (already locked in contract) is transferred to seller
+        IERC20(strikeToken).safeTransfer(option.seller, premiumToSeller);
+
+        emit OrderFilled(_optionId, option.buyer, msg.sender, premiumToSeller);
     }
 
     /**

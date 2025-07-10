@@ -25,8 +25,10 @@ contract MutatedOptionPairV2Test is Test {
     uint256 internal constant STRIKE_AMOUNT = 200e18;
     uint256 internal constant PREMIUM_AMOUNT = 10e18;
     uint256 internal constant PERIOD_IN_SECONDS = 3600; // 1 hour
+    UD60x18 internal FEE_RATE;
 
     function setUp() public {
+        FEE_RATE = ud(0.01e18); // 1%
         feeRecipient = makeAddr("feeRecipient");
 
         underlyingToken = new TestToken(
@@ -43,6 +45,10 @@ contract MutatedOptionPairV2Test is Test {
             address(strikeToken),
             address(feeCalculator)
         );
+
+        // Set a fee for the strike token in the FeeCalculator
+        vm.prank(deployer);
+        feeCalculator.setFeeRate(address(strikeToken), FEE_RATE);
 
         // Mint tokens for seller and buyer from the deployer's balance
         underlyingToken.transfer(seller, UNDERLYING_AMOUNT * 10);
@@ -73,6 +79,11 @@ contract MutatedOptionPairV2Test is Test {
             address(strikeToken),
             "Strike token mismatch"
         );
+        assertEq(
+            address(optionPair.feeCalculator()),
+            address(feeCalculator),
+            "Fee calculator mismatch"
+        );
     }
 
     function _createAndFillAsk() internal returns (uint256 optionId) {
@@ -92,6 +103,156 @@ contract MutatedOptionPairV2Test is Test {
         vm.stopPrank();
     }
 
+    function test_CreateAndFillAsk_Success() public {
+        uint256 sellerStrikeBalanceBefore = strikeToken.balanceOf(seller);
+        uint256 buyerStrikeBalanceBefore = strikeToken.balanceOf(buyer);
+        uint256 feeRecipientStrikeBalanceBefore = strikeToken.balanceOf(
+            feeRecipient
+        );
+        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            seller
+        );
+
+        // Action
+        _createAndFillAsk();
+        uint256 optionId = 1;
+
+        // --- Checks ---
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+
+        // Check option state
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Active)
+        );
+        assertEq(option.buyer, buyer);
+        assertEq(option.seller, seller);
+
+        // Calculate expected fee
+        uint256 fee = feeCalculator.getFee(
+            address(strikeToken),
+            PREMIUM_AMOUNT
+        );
+        uint256 premiumToSeller = PREMIUM_AMOUNT - fee;
+
+        // Check balances after fill
+        // Seller receives premium minus fee
+        assertEq(
+            strikeToken.balanceOf(seller),
+            sellerStrikeBalanceBefore + premiumToSeller,
+            "Seller should receive premium minus fee"
+        );
+
+        // Buyer pays premium
+        assertEq(
+            strikeToken.balanceOf(buyer),
+            buyerStrikeBalanceBefore - PREMIUM_AMOUNT,
+            "Buyer should have paid premium"
+        );
+
+        // Fee recipient receives the fee
+        assertEq(
+            strikeToken.balanceOf(feeRecipient),
+            feeRecipientStrikeBalanceBefore + fee,
+            "Fee recipient should receive fee"
+        );
+
+        // Seller's underlying is locked in createAsk
+        assertEq(
+            underlyingToken.balanceOf(seller),
+            sellerUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Seller should have locked underlying"
+        );
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            UNDERLYING_AMOUNT,
+            "Contract should hold underlying"
+        );
+    }
+
+    function test_CreateAndFillBid_Success() public {
+        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
+            seller
+        );
+        uint256 sellerStrikeBalanceBefore = strikeToken.balanceOf(seller);
+        uint256 buyerStrikeBalanceBefore = strikeToken.balanceOf(buyer);
+        uint256 feeRecipientStrikeBalanceBefore = strikeToken.balanceOf(
+            feeRecipient
+        );
+
+        // Action: buyer creates bid, seller fills it
+        vm.startPrank(buyer);
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+
+        uint256 optionId = 1;
+
+        vm.startPrank(seller);
+        optionPair.fillBid(optionId);
+        vm.stopPrank();
+
+        // --- Checks ---
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+
+        // Check option state
+        assertEq(
+            uint(option.state),
+            uint(MutatedOptionPairV2.OptionState.Active)
+        );
+        assertEq(option.buyer, buyer);
+        assertEq(option.seller, seller);
+
+        // Calculate expected fee
+        uint256 fee = feeCalculator.getFee(
+            address(strikeToken),
+            PREMIUM_AMOUNT
+        );
+        uint256 premiumToSeller = PREMIUM_AMOUNT - fee;
+
+        // Check balances after fill
+        // Buyer's strike balance decreases by premium in createBid
+        assertEq(
+            strikeToken.balanceOf(buyer),
+            buyerStrikeBalanceBefore - PREMIUM_AMOUNT,
+            "Buyer should have paid premium"
+        );
+
+        // Seller receives premium minus fee
+        assertEq(
+            strikeToken.balanceOf(seller),
+            sellerStrikeBalanceBefore + premiumToSeller,
+            "Seller should receive premium minus fee"
+        );
+
+        // Fee recipient receives the fee
+        assertEq(
+            strikeToken.balanceOf(feeRecipient),
+            feeRecipientStrikeBalanceBefore + fee,
+            "Fee recipient should receive fee"
+        );
+
+        // Seller locks underlying asset
+        assertEq(
+            underlyingToken.balanceOf(seller),
+            sellerUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
+            "Seller should have locked underlying"
+        );
+        assertEq(
+            underlyingToken.balanceOf(address(optionPair)),
+            UNDERLYING_AMOUNT,
+            "Contract should hold underlying"
+        );
+    }
+
     function testGetClosingFeePercentage() public {
         uint256 optionId = _createAndFillAsk();
 
@@ -105,7 +266,7 @@ contract MutatedOptionPairV2Test is Test {
         // Expected: Y = 1 - (1 - 0.5)^2 = 1 - 0.25 = 0.75
         assertEq(
             feePercentHalfTime.intoUint256(),
-            0.75e18,
+            ud(0.75e18).intoUint256(),
             "Fee percent at half time should be 0.75"
         );
 
@@ -121,7 +282,7 @@ contract MutatedOptionPairV2Test is Test {
         );
         // Expected: Y should be close to 1
         assertTrue(
-            feePercentFullTime.intoUint256() > 0.99e18,
+            feePercentFullTime.intoUint256() > 0.999e18,
             "Fee percent at full time should be close to 1"
         );
 
@@ -244,81 +405,6 @@ contract MutatedOptionPairV2Test is Test {
         vm.expectRevert("Option: Already expired");
         optionPair.closeOption(optionId);
         vm.stopPrank();
-    }
-
-    // --- Bid and Fill Bid Tests ---
-
-    function _createAndFillBid() internal returns (uint256 optionId) {
-        vm.startPrank(buyer);
-        optionPair.createBid(
-            UNDERLYING_AMOUNT,
-            STRIKE_AMOUNT,
-            PREMIUM_AMOUNT,
-            PERIOD_IN_SECONDS
-        );
-        vm.stopPrank();
-
-        optionId = 1;
-
-        vm.startPrank(seller);
-        optionPair.fillBid(optionId);
-        vm.stopPrank();
-    }
-
-    function test_CreateAndFillBid_Success() public {
-        uint256 sellerUnderlyingBalanceBefore = underlyingToken.balanceOf(
-            seller
-        );
-        uint256 contractStrikeBalanceBefore = strikeToken.balanceOf(
-            address(optionPair)
-        );
-        uint256 contractUnderlyingBalanceBefore = underlyingToken.balanceOf(
-            address(optionPair)
-        );
-
-        _createAndFillBid();
-        uint256 optionId = 1;
-
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(
-            optionId
-        );
-
-        // Check option state
-        assertEq(
-            uint(option.state),
-            uint(MutatedOptionPairV2.OptionState.Active)
-        );
-        assertEq(option.buyer, buyer);
-        assertEq(option.seller, seller);
-
-        // Check balances after fill
-        // Buyer's premium is locked in createBid, then transferred to seller in fillBid.
-        // Net change for buyer is 0 from their perspective at this point, as the premium is gone.
-        // The contract's strike balance should be net zero (premium in, premium out).
-        assertEq(
-            strikeToken.balanceOf(address(optionPair)),
-            contractStrikeBalanceBefore,
-            "Contract strike balance should be net zero"
-        );
-
-        // Seller receives the premium
-        assertEq(
-            strikeToken.balanceOf(seller),
-            strikeToken.balanceOf(seller),
-            "Seller should receive premium"
-        );
-
-        // Seller locks underlying asset
-        assertEq(
-            underlyingToken.balanceOf(seller),
-            sellerUnderlyingBalanceBefore - UNDERLYING_AMOUNT,
-            "Seller should have locked underlying"
-        );
-        assertEq(
-            underlyingToken.balanceOf(address(optionPair)),
-            contractUnderlyingBalanceBefore + UNDERLYING_AMOUNT,
-            "Contract should hold underlying"
-        );
     }
 
     // --- Cancel Order Tests ---
@@ -723,10 +809,8 @@ contract MutatedOptionPairV2Test is Test {
         vm.stopPrank();
         uint256 optionId = 1; // State is Open, not Active
 
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(
-            optionId
-        );
-        vm.warp(option.expirationTimestamp + 1); // Expire
+        // Expire the option order (not the active option)
+        vm.warp(block.timestamp + PERIOD_IN_SECONDS + 1);
 
         vm.startPrank(seller);
         vm.expectRevert("Option: Not active");
@@ -787,8 +871,8 @@ contract MutatedOptionPairV2Test is Test {
             "Fee must be less than total premium"
         );
         assertTrue(
-            closingFee > (PREMIUM_AMOUNT * 999) / 1000,
-            "Fee should be > 99.9% of premium"
+            closingFee > (PREMIUM_AMOUNT * 9999) / 10000,
+            "Fee should be > 99.99% of premium"
         );
 
         vm.startPrank(seller);
@@ -809,14 +893,17 @@ contract MutatedOptionPairV2Test is Test {
         uint256 optionId = _createAndFillAsk();
 
         // Close 1 second before expiration
-        vm.warp(block.timestamp + PERIOD_IN_SECONDS - 1);
+        MutatedOptionPairV2.Option memory optionBefore = optionPair.getOption(
+            optionId
+        );
+        vm.warp(optionBefore.expirationTimestamp - 1);
 
         uint256 closingFee = optionPair.calculateClosingFeeAmount(optionId);
 
         // Fee should be very close to 0
         assertTrue(
-            closingFee < PREMIUM_AMOUNT / 100,
-            "Fee should be < 1% of premium right before expiration"
+            closingFee < PREMIUM_AMOUNT / 1000,
+            "Fee should be < 0.1% of premium right before expiration"
         );
         assertTrue(closingFee > 0, "Fee should be greater than 0");
 
@@ -824,11 +911,11 @@ contract MutatedOptionPairV2Test is Test {
         optionPair.closeOption(optionId);
         vm.stopPrank();
 
-        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+        MutatedOptionPairV2.Option memory optionAfter = optionPair.getOption(
             optionId
         );
         assertEq(
-            uint(option.state),
+            uint(optionAfter.state),
             uint(MutatedOptionPairV2.OptionState.Closed),
             "Option state should be Closed"
         );
