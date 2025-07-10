@@ -920,4 +920,42 @@ contract MutatedOptionPairV2Test is Test {
             "Option state should be Closed"
         );
     }
+
+    function test_Fill_RevertsWhenPremiumEqualsFee() public {
+        // Set fee rate to 100%
+        vm.prank(deployer);
+        feeCalculator.setFeeRate(address(strikeToken), ud(1e18));
+
+        // --- Test Ask ---
+        vm.startPrank(seller);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 askOptionId = 1;
+
+        vm.startPrank(buyer);
+        vm.expectRevert("Premium must be greater than the fee");
+        optionPair.fillAsk(askOptionId);
+        vm.stopPrank();
+
+        // --- Test Bid ---
+        vm.startPrank(buyer);
+        optionPair.createBid(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 bidOptionId = 2;
+
+        vm.startPrank(seller);
+        vm.expectRevert("Premium must be greater than the fee");
+        optionPair.fillBid(bidOptionId);
+        vm.stopPrank();
+    }
 }

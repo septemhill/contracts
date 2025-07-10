@@ -262,8 +262,8 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
 
         // Ensure premium is sufficient to pay the fee
         require(
-            option.premiumAmount >= fee,
-            "Premium amount is insufficient to pay the fee"
+            option.premiumAmount > fee,
+            "Premium must be greater than the fee"
         );
 
         // Deduct fee from premium amount
@@ -318,8 +318,8 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
 
         // Ensure premium is sufficient to pay the fee
         require(
-            option.premiumAmount >= fee,
-            "Premium amount is insufficient to pay the fee"
+            option.premiumAmount > fee,
+            "Premium must be greater than the fee"
         );
 
         // Deduct fee from premium amount
