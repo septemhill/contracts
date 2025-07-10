@@ -14,32 +14,114 @@ contract MutatedOptionTest is Test {
     address public buyer1;
     address public buyer2;
 
-    uint256 public constant INITIAL_TOKEN_BALANCE = 1000 ether;
+    uint256 public constant INITIAL_TOKEN_BALANCE = 1000; // Base amount, decimals applied during minting
 
     function setUp() public {
+        _deployTokensWithDecimals(6, 8); // Default setup with 6 and 8 decimals
+    }
+
+    function _deployTokensWithDecimals(uint8 underlyingDecimals, uint8 strikeDecimals) internal {
         mutatedOption = new MutatedOption();
         underlyingToken = new TestToken(
             "Underlying Token",
             "UND",
             INITIAL_TOKEN_BALANCE,
-            18
+            underlyingDecimals
         );
         strikeToken = new TestToken(
             "Strike Token",
             "STK",
             INITIAL_TOKEN_BALANCE,
-            18
+            strikeDecimals
         );
 
         seller = makeAddr("seller");
         buyer1 = makeAddr("buyer1");
         buyer2 = makeAddr("buyer2");
 
-        // Mint initial tokens for seller and buyers
-        underlyingToken.mint(seller, INITIAL_TOKEN_BALANCE);
-        strikeToken.mint(seller, INITIAL_TOKEN_BALANCE);
-        strikeToken.mint(buyer1, INITIAL_TOKEN_BALANCE);
-        strikeToken.mint(buyer2, INITIAL_TOKEN_BALANCE);
+        // Mint initial tokens for seller and buyers, adjusting for decimals
+        underlyingToken.mint(seller, INITIAL_TOKEN_BALANCE * (10**underlyingToken.decimals()));
+        strikeToken.mint(seller, INITIAL_TOKEN_BALANCE * (10**strikeToken.decimals()));
+        strikeToken.mint(buyer1, INITIAL_TOKEN_BALANCE * (10**strikeToken.decimals()));
+        strikeToken.mint(buyer2, INITIAL_TOKEN_BALANCE * (10**strikeToken.decimals()));
+    }
+
+    function testCreateOptionSuccess_DifferentDecimals() public {
+        // Test with underlying 18 decimals and strike 6 decimals
+        _deployTokensWithDecimals(18, 6);
+
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
+        uint256 periodInSeconds = 3 days;
+
+        uint256 sellerInitialUnderlyingBalance = underlyingToken.balanceOf(seller);
+
+        vm.startPrank(seller);
+        underlyingToken.approve(address(mutatedOption), underlyingAmount);
+
+        vm.expectEmit(true, true, false, true);
+        emit MutatedOption.OptionCreated(
+            1,
+            seller,
+            address(underlyingToken),
+            underlyingAmount,
+            address(strikeToken),
+            strikeAmount,
+            premiumAmount,
+            block.timestamp + periodInSeconds
+        );
+
+        mutatedOption.createOption(
+            address(underlyingToken),
+            underlyingAmount,
+            address(strikeToken),
+            strikeAmount,
+            premiumAmount,
+            periodInSeconds
+        );
+        vm.stopPrank();
+
+        assertEq(underlyingToken.balanceOf(seller), sellerInitialUnderlyingBalance - underlyingAmount);
+        assertEq(underlyingToken.balanceOf(address(mutatedOption)), underlyingAmount);
+
+        // Test with underlying 0 decimals and strike 0 decimals
+        _deployTokensWithDecimals(0, 0);
+
+        underlyingAmount = 1;
+        strikeAmount = 45;
+        premiumAmount = 10;
+        periodInSeconds = 3 days;
+
+        sellerInitialUnderlyingBalance = underlyingToken.balanceOf(seller);
+
+        vm.startPrank(seller);
+        underlyingToken.approve(address(mutatedOption), underlyingAmount);
+
+        vm.expectEmit(true, true, false, true);
+        emit MutatedOption.OptionCreated(
+            1,
+            seller,
+            address(underlyingToken),
+            underlyingAmount,
+            address(strikeToken),
+            strikeAmount,
+            premiumAmount,
+            block.timestamp + periodInSeconds
+        );
+
+        mutatedOption.createOption(
+            address(underlyingToken),
+            underlyingAmount,
+            address(strikeToken),
+            strikeAmount,
+            premiumAmount,
+            periodInSeconds
+        );
+        vm.stopPrank();
+
+        assertEq(underlyingToken.balanceOf(seller), sellerInitialUnderlyingBalance - underlyingAmount);
+        assertEq(underlyingToken.balanceOf(address(mutatedOption)), underlyingAmount);
     }
 
     // Helper function to create an option
@@ -104,9 +186,9 @@ contract MutatedOptionTest is Test {
 
     // Test cases for createOption
     function testCreateOptionSuccess() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
         // closingFeeAmount is not relevant for createOption, removed from local variable
 
@@ -175,8 +257,8 @@ contract MutatedOptionTest is Test {
 
     function testCreateOptionRevertZeroUnderlyingAmount() public {
         uint256 underlyingAmount = 0;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
 
         vm.startPrank(seller);
@@ -193,9 +275,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testCreateOptionRevertZeroStrikeAmount() public {
-        uint256 underlyingAmount = 1 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
         uint256 strikeAmount = 0;
-        uint256 premiumAmount = 10 ether;
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
 
         vm.startPrank(seller);
@@ -212,8 +294,8 @@ contract MutatedOptionTest is Test {
     }
 
     function testCreateOptionRevertZeroPremiumAmount() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
         uint256 premiumAmount = 0;
         uint256 periodInSeconds = 3 days;
 
@@ -231,9 +313,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testCreateOptionRevertZeroPeriod() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 0;
 
         vm.startPrank(seller);
@@ -251,11 +333,11 @@ contract MutatedOptionTest is Test {
 
     // Test cases for purchaseOption
     function testPurchaseOptionSuccess() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -313,11 +395,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testPurchaseOptionRevertNotAvailable() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -336,11 +418,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testPurchaseOptionRevertSellerCannotPurchase() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -358,11 +440,11 @@ contract MutatedOptionTest is Test {
 
     // Test cases for exerciseOption
     function testExerciseOptionSuccess() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -423,9 +505,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testExerciseOptionRevertNotActive() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
         // uint256 closingFeeAmount = 5 ether;
 
@@ -444,11 +526,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testExerciseOptionRevertNotBuyer() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -466,11 +548,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testExerciseOptionRevertExpired() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 1;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -491,11 +573,11 @@ contract MutatedOptionTest is Test {
 
     // Test cases for claimUnderlyingOnExpiration
     function testClaimUnderlyingOnExpirationSuccess() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 1;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -544,9 +626,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testClaimUnderlyingOnExpirationRevertNotActive() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 1;
         // uint256 closingFeeAmount = 5 ether;
 
@@ -566,11 +648,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testClaimUnderlyingOnExpirationRevertNotSeller() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 1;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -589,11 +671,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testClaimUnderlyingOnExpirationRevertNotExpired() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -611,11 +693,11 @@ contract MutatedOptionTest is Test {
 
     // Test cases for closeOption
     function testCloseOptionSuccess() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -681,9 +763,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testCloseOptionRevertNotActive() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
         // uint256 closingFeeAmount = 5 ether;
 
@@ -702,11 +784,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testCloseOptionRevertNotSeller() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -726,11 +808,11 @@ contract MutatedOptionTest is Test {
     }
 
     function testCloseOptionRevertExpired() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 1;
-        uint256 closingFeeAmount = 5 ether;
+        uint256 closingFeeAmount = 5 * (10**strikeToken.decimals());
 
         uint256 optionId = _createOption(
             seller,
@@ -750,9 +832,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testCloseOptionRevertNoBuyer() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
         // uint256 closingFeeAmount = 5 ether; // Even if a fee is specified, if no buyer, it should revert
 
@@ -772,9 +854,9 @@ contract MutatedOptionTest is Test {
     }
 
     function testCloseOptionRevertZeroClosingFee() public {
-        uint256 underlyingAmount = 1 ether;
-        uint256 strikeAmount = 45 ether;
-        uint256 premiumAmount = 10 ether;
+        uint256 underlyingAmount = 1 * (10**underlyingToken.decimals());
+        uint256 strikeAmount = 45 * (10**strikeToken.decimals());
+        uint256 premiumAmount = 10 * (10**strikeToken.decimals());
         uint256 periodInSeconds = 3 days;
         uint256 closingFeeAmount = 0; // Set closing fee to 0
 

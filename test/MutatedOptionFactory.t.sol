@@ -33,11 +33,19 @@ contract MutatedOptionFactoryTest is Test {
             initialMintAmount,
             18
         );
-        strikeToken = new TestToken("Strike Token", "STK", initialMintAmount, 18);
+        strikeToken = new TestToken(
+            "Strike Token",
+            "STK",
+            initialMintAmount,
+            18
+        );
         vm.stopPrank();
 
         // Mint tokens for the buyer as well
-        strikeToken.mint(buyer, initialMintAmount * 1e18);
+        strikeToken.mint(
+            buyer,
+            initialMintAmount * (10 ** strikeToken.decimals())
+        );
     }
 
     // --- Factory Tests ---
@@ -252,7 +260,9 @@ contract MutatedOptionFactoryTest is Test {
         );
         assertEq(
             strikeToken.balanceOf(seller),
-            (initialMintAmount * 1e18) + premiumAmount + strikeAmount,
+            (initialMintAmount * (10 ** strikeToken.decimals())) +
+                premiumAmount +
+                strikeAmount,
             "Seller STK balance incorrect after exercise"
         );
         assertEq(
@@ -273,16 +283,16 @@ contract MutatedOptionFactoryTest is Test {
             salt
         );
         optionPair = MutatedOptionPairV1(pairAddress);
-        uint256 underlyingAmount = 1e18;
+        uint256 underlyingAmount = 1 * (10 ** underlyingToken.decimals());
         uint256 period = 1 days;
         uint256 optionId = 1;
-        uint256 premiumAmount = 5e18;
+        uint256 premiumAmount = 5 * (10 ** strikeToken.decimals());
 
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), underlyingAmount);
         optionPair.createOption(
             underlyingAmount,
-            100e18,
+            100 * (10 ** strikeToken.decimals()),
             premiumAmount,
             period
         );
@@ -290,7 +300,7 @@ contract MutatedOptionFactoryTest is Test {
 
         vm.startPrank(buyer);
         strikeToken.approve(address(optionPair), premiumAmount);
-        optionPair.purchaseOption(optionId, 2e18);
+        optionPair.purchaseOption(optionId, 2 * (10 ** strikeToken.decimals()));
         vm.stopPrank();
 
         // Fast forward time past expiration
@@ -310,7 +320,7 @@ contract MutatedOptionFactoryTest is Test {
         );
         assertEq(
             underlyingToken.balanceOf(seller),
-            initialMintAmount * 1e18,
+            initialMintAmount * (10 ** underlyingToken.decimals()),
             "Seller should have received underlying back"
         );
         assertEq(
@@ -331,16 +341,16 @@ contract MutatedOptionFactoryTest is Test {
             salt
         );
         optionPair = MutatedOptionPairV1(pairAddress);
-        uint256 underlyingAmount = 1e18;
-        uint256 closingFee = 2e18;
+        uint256 underlyingAmount = 1 * (10 ** underlyingToken.decimals());
+        uint256 closingFee = 2 * (10 ** strikeToken.decimals());
         uint256 optionId = 1;
-        uint256 premiumAmount = 5e18;
+        uint256 premiumAmount = 5 * (10 ** strikeToken.decimals());
 
         vm.startPrank(seller);
         underlyingToken.approve(address(optionPair), underlyingAmount);
         optionPair.createOption(
             underlyingAmount,
-            100e18,
+            100 * (10 ** strikeToken.decimals()),
             premiumAmount,
             1 days
         );
@@ -372,7 +382,9 @@ contract MutatedOptionFactoryTest is Test {
         );
         assertEq(
             strikeToken.balanceOf(buyer),
-            (initialMintAmount * 1e18) - premiumAmount + closingFee,
+            (initialMintAmount * (10 ** strikeToken.decimals())) -
+                premiumAmount +
+                closingFee,
             "Buyer should get closing fee"
         );
         assertEq(
@@ -385,7 +397,74 @@ contract MutatedOptionFactoryTest is Test {
 
     // --- Revert Tests for createOption ---
 
-    function test_Revert_CreateOption_ZeroUnderlying() public {
+    function test_Revert_CreateOption_ZeroUnderlying_Robust() public {
+        bytes32 salt = keccak256(abi.encodePacked("revert-salt-0"));
+
+        console.log("Before createOptionPair");
+        address pairAddress = factory.createOptionPair(
+            address(underlyingToken),
+            address(strikeToken),
+            salt
+        );
+        console.log("After createOptionPair, pairAddress:", pairAddress);
+
+        optionPair = MutatedOptionPairV1(pairAddress);
+
+        vm.prank(seller);
+        underlyingToken.approve(address(optionPair), type(uint256).max);
+        vm.stopPrank();
+
+        // --- The key change: Calculate arguments into local variables ---
+        console.log("Fetching strikeToken.decimals()...");
+        uint256 strikeDecimals = strikeToken.decimals(); // Call decimals once
+        console.log("strikeToken.decimals() returned:", strikeDecimals); // This log should now appear
+
+        uint256 base = 10;
+        uint256 exponent = strikeDecimals;
+        uint256 tenPowerDecimals;
+
+        // Manual power calculation if 10 ** strikeDecimals still causes issues,
+        // though it's less likely now that decimals is in a variable.
+        // If 10 ** strikeDecimals is still problematic, use a loop:
+        // tenPowerDecimals = 1;
+        // for (uint256 i = 0; i < exponent; i++) {
+        //     tenPowerDecimals *= base;
+        // }
+        tenPowerDecimals = base ** exponent; // This is typically fine with a variable exponent
+        console.log(
+            "10 ** strikeDecimals (using variable) is:",
+            tenPowerDecimals
+        );
+
+        uint256 finalStrikeAmount = 100 * tenPowerDecimals;
+        uint256 finalPremiumAmount = 5 * tenPowerDecimals;
+        uint256 finalPeriodInSeconds = 1 days; // Or 86400
+
+        console.log("Calculated strikeAmount:", finalStrikeAmount);
+        console.log("Calculated premiumAmount:", finalPremiumAmount);
+        console.log("Calculated periodInSeconds:", finalPeriodInSeconds);
+        // ---------------------------------------------------------------
+
+        vm.startPrank(seller);
+        console.log("Before expectRevert");
+        vm.expectRevert("Option: Underlying amount must be greater than 0");
+        console.log("After expectRevert");
+
+        console.log("Before createOption call");
+        optionPair.createOption(
+            0, // _underlyingAmount - still 0 to test the revert
+            finalStrikeAmount,
+            finalPremiumAmount,
+            finalPeriodInSeconds
+        );
+        console.log(
+            "After createOption call (should not be reached if revert works)"
+        ); // This log will not appear if revert is caught
+
+        vm.stopPrank();
+    }
+
+    function test_Revert_CreateOption_ZeroUnderlying_DirectArgs() public {
         bytes32 salt = keccak256(abi.encodePacked("revert-salt-0"));
         address pairAddress = factory.createOptionPair(
             address(underlyingToken),
@@ -393,9 +472,23 @@ contract MutatedOptionFactoryTest is Test {
             salt
         );
         optionPair = MutatedOptionPairV1(pairAddress);
+
+        vm.prank(seller);
+        underlyingToken.approve(address(optionPair), type(uint256).max);
+        vm.stopPrank();
         vm.startPrank(seller);
-        vm.expectRevert("Option: Underlying amount must be greater than 0");
-        optionPair.createOption(0, 100e18, 5e18, 1 days);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "Error(string)",
+                "Option: Underlying amount must be greater than 0"
+            )
+        );
+        optionPair.createOption(
+            0, // _underlyingAmount
+            100 * 1e18, // _strikeAmount (direct value, 100 with 18 decimals)
+            5 * 1e18, // _premiumAmount (direct value, 5 with 18 decimals)
+            86400 // _periodInSeconds (1 day in seconds)
+        );
         vm.stopPrank();
     }
 
@@ -407,9 +500,24 @@ contract MutatedOptionFactoryTest is Test {
             salt
         );
         optionPair = MutatedOptionPairV1(pairAddress);
+
+        vm.prank(seller);
+        underlyingToken.approve(address(optionPair), type(uint256).max);
+        vm.stopPrank();
+
         vm.startPrank(seller);
-        vm.expectRevert("Option: Strike amount must be greater than 0");
-        optionPair.createOption(1e18, 0, 5e18, 1 days);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "Error(string)",
+                "Option: Strike amount must be greater than 0"
+            )
+        );
+        optionPair.createOption(
+            1e18, // _underlyingAmount
+            0, // _strikeAmount
+            5e18, // _premiumAmount
+            1 days // _periodInSeconds
+        );
         vm.stopPrank();
     }
 
@@ -421,9 +529,24 @@ contract MutatedOptionFactoryTest is Test {
             salt
         );
         optionPair = MutatedOptionPairV1(pairAddress);
+
+        vm.prank(seller);
+        underlyingToken.approve(address(optionPair), type(uint256).max);
+        vm.stopPrank();
+
         vm.startPrank(seller);
-        vm.expectRevert("Option: Premium amount must be greater than 0");
-        optionPair.createOption(1e18, 100e18, 0, 1 days);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "Error(string)",
+                "Option: Premium amount must be greater than 0"
+            )
+        );
+        optionPair.createOption(
+            1e18, // _underlyingAmount
+            100e18, // _strikeAmount
+            0, // _premiumAmount
+            1 days // _periodInSeconds
+        );
         vm.stopPrank();
     }
 
@@ -435,9 +558,24 @@ contract MutatedOptionFactoryTest is Test {
             salt
         );
         optionPair = MutatedOptionPairV1(pairAddress);
+
+        vm.prank(seller);
+        underlyingToken.approve(address(optionPair), type(uint256).max);
+        vm.stopPrank();
+
         vm.startPrank(seller);
-        vm.expectRevert("Option: Period must be greater than 0");
-        optionPair.createOption(1e18, 100e18, 5e18, 0);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "Error(string)",
+                "Option: Period must be greater than 0"
+            )
+        );
+        optionPair.createOption(
+            1e18, // _underlyingAmount
+            100e18, // _strikeAmount
+            5e18, // _premiumAmount
+            0 // _periodInSeconds
+        );
         vm.stopPrank();
     }
 

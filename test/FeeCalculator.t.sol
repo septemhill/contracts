@@ -20,8 +20,8 @@ contract FeeCalculatorTest is Test {
 
         vm.startPrank(owner);
         feeCalculator = new FeeCalculator(owner);
-        tokenA = new TestToken("Token A", "TKA", 1_000_000, 18);
-        tokenB = new TestToken("Token B", "TKB", 1_000_000, 18);
+        tokenA = new TestToken("Token A", "TKA", 1_000_000, 6);
+        tokenB = new TestToken("Token B", "TKB", 1_000_000, 8);
         vm.stopPrank();
     }
 
@@ -45,7 +45,7 @@ contract FeeCalculatorTest is Test {
         feeCalculator.setFeeRate(address(tokenA), feeRate);
         vm.stopPrank();
 
-        uint256 amount = 1000 ether;
+        uint256 amount = 1000 * (10**tokenA.decimals());
         uint256 expectedFee = ud(amount).mul(feeRate).intoUint256();
         uint256 actualFee = feeCalculator.getFee(address(tokenA), amount);
 
@@ -53,7 +53,7 @@ contract FeeCalculatorTest is Test {
     }
 
     function test_CalculateFee_NoRateSet() public view {
-        uint256 amount = 1000 ether;
+        uint256 amount = 1000 * (10**tokenB.decimals());
         uint256 fee = feeCalculator.getFee(address(tokenB), amount);
         assertEq(fee, 0, "Fee should be 0 for token with no rate set");
     }

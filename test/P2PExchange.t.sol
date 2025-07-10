@@ -13,19 +13,67 @@ contract P2PExchangeTest is Test {
     address public constant MAKER = address(0x1);
     address public constant TAKER = address(0x2);
 
-    uint256 public constant INITIAL_TOKEN_AMOUNT = 1_000_000e18;
-    uint256 public constant TEST_SEND_AMOUNT = 10_000e18;
+    uint256 public constant INITIAL_TOKEN_AMOUNT = 1_000_000; // Base amount, decimals applied during minting
+    uint256 public constant TEST_SEND_AMOUNT = 10_000; // Base amount, decimals applied during transfer
 
     function setUp() public {
-        exchange = new P2PExchange();
-        tokenA = new TestToken("Token A", "TKA", INITIAL_TOKEN_AMOUNT, 18);
-        tokenB = new TestToken("Token B", "TKB", INITIAL_TOKEN_AMOUNT, 18);
+        _deployTokensWithDecimals(18, 18); // Default setup with 18 decimals
+    }
 
-        // Distribute tokens to maker and taker
-        tokenA.transfer(MAKER, TEST_SEND_AMOUNT);
-        tokenB.transfer(MAKER, TEST_SEND_AMOUNT);
-        tokenA.transfer(TAKER, TEST_SEND_AMOUNT);
-        tokenB.transfer(TAKER, TEST_SEND_AMOUNT);
+    function _deployTokensWithDecimals(uint8 decimalsA, uint8 decimalsB) internal {
+        exchange = new P2PExchange();
+        tokenA = new TestToken("Token A", "TKA", INITIAL_TOKEN_AMOUNT, decimalsA);
+        tokenB = new TestToken("Token B", "TKB", INITIAL_TOKEN_AMOUNT, decimalsB);
+
+        // Distribute tokens to maker and taker, adjusting for decimals
+        tokenA.transfer(MAKER, TEST_SEND_AMOUNT * (10 ** decimalsA));
+        tokenB.transfer(MAKER, TEST_SEND_AMOUNT * (10 ** decimalsB));
+        tokenA.transfer(TAKER, TEST_SEND_AMOUNT * (10 ** decimalsA));
+        tokenB.transfer(TAKER, TEST_SEND_AMOUNT * (10 ** decimalsB));
+    }
+
+    function test_CreateOffer_DifferentDecimals() public {
+        // Test with tokenA having 6 decimals and tokenB having 18 decimals
+        _deployTokensWithDecimals(6, 18);
+
+        uint256 amountSell = 100 * (10 ** tokenA.decimals()); // 100 units of Token A
+        uint256 amountBuy = 200 * (10 ** tokenB.decimals()); // 200 units of Token B
+
+        vm.startPrank(MAKER);
+        tokenA.approve(address(exchange), amountSell);
+
+        vm.expectEmit(true, true, true, true);
+        emit P2PExchange.OfferCreated(0, MAKER, address(tokenA), amountSell, address(tokenB), amountBuy);
+        exchange.createOffer(tokenA, amountSell, tokenB, amountBuy);
+
+        (uint256 id, address maker, IERC20 tokenSell, , IERC20 tokenBuy, , P2PExchange.OfferStatus status) = exchange.offers(0);
+        assertEq(maker, MAKER);
+        assertEq(address(tokenSell), address(tokenA));
+        assertEq(uint(status), 0); // Open
+
+        assertEq(tokenA.balanceOf(address(exchange)), amountSell);
+        vm.stopPrank();
+
+        // Test with tokenA having 18 decimals and tokenB having 6 decimals
+        _deployTokensWithDecimals(18, 6);
+
+        amountSell = 50 * (10 ** tokenA.decimals()); // 50 units of Token A
+        amountBuy = 100 * (10 ** tokenB.decimals()); // 100 units of Token B
+
+        vm.startPrank(MAKER);
+        tokenA.approve(address(exchange), amountSell);
+
+        vm.expectEmit(true, true, true, true);
+        emit P2PExchange.OfferCreated(0, MAKER, address(tokenA), amountSell, address(tokenB), amountBuy); // Offer ID will be 0 as exchange is re-deployed
+        exchange.createOffer(tokenA, amountSell, tokenB, amountBuy);
+
+        (id, maker, tokenSell, , tokenBuy, , status) = exchange.offers(0);
+        assertEq(maker, MAKER);
+        assertEq(address(tokenSell), address(tokenA));
+        assertEq(uint(status), 0); // Open
+
+        assertEq(tokenA.balanceOf(address(exchange)), amountSell);
+        vm.stopPrank();
     }
 
     function test_CreateOffer() public {
