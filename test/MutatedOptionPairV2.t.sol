@@ -566,7 +566,7 @@ contract MutatedOptionPairV2Test is Test {
             PERIOD_IN_SECONDS
         );
 
-        vm.expectRevert("Ask: Period must be > 0");
+        vm.expectRevert("Ask: Period must be at least 1 hour (3600 seconds)");
         optionPair.createAsk(
             UNDERLYING_AMOUNT,
             STRIKE_AMOUNT,
@@ -602,7 +602,7 @@ contract MutatedOptionPairV2Test is Test {
             PERIOD_IN_SECONDS
         );
 
-        vm.expectRevert("Bid: Period must be > 0");
+        vm.expectRevert("Bid: Period must be at least 1 hour (3600 seconds)");
         optionPair.createBid(
             UNDERLYING_AMOUNT,
             STRIKE_AMOUNT,

@@ -8,18 +8,25 @@ import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
  * @title FeeCalculator
  * @author Gemini
  * @notice This contract is responsible for calculating the fees for token transactions.
- *         It allows the owner to set fee rates for different tokens and provides a
- *         function to calculate the fee for a given amount of a specific token.
- *         Fee rates are stored as UD60x18 fixed-point numbers.
+ * It allows the owner to set fee rates for specific, explicitly supported tokens.
+ * Fee rates are stored as UD60x18 fixed-point numbers.
+ * Only supported tokens can have their fees calculated.
  */
 contract FeeCalculator is Ownable {
     /**
-     * @notice The fee rate is stored as a UD60x18 fixed-point number. 1.0 represents 100%.
-     * @dev mapping from token address to fee rate in UD60x18 format.
+     * @notice Mapping from token address to its fee rate in UD60x18 format.
+     * 1.0e18 represents 100%.
      */
     mapping(address => UD60x18) public feeRates;
 
+    /**
+     * @notice Mapping to keep track of explicitly supported tokens.
+     * Only tokens marked as true here can have their fees calculated.
+     */
+    mapping(address => bool) public supportedTokens;
+
     event FeeRateSet(address indexed token, UD60x18 newRate);
+    event TokenSupportToggled(address indexed token, bool isSupported);
 
     /**
      * @notice Initializes the contract, setting the deployer as the initial owner.
@@ -28,26 +35,74 @@ contract FeeCalculator is Ownable {
     constructor(address initialOwner) Ownable(initialOwner) {}
 
     /**
-     * @notice Sets the fee rate for a specific token.
-     * @dev The fee rate is specified as a UD60x18 number. For example, 0.005e18 for 0.5%.
-     *      Can only be called by the owner.
+     * @notice Sets the fee rate for a specific token and adds it to the supported list.
+     * @dev The fee rate is specified as a UD60x18 number (e.g., 0.005e18 for 0.5%).
+     * Can only be called by the owner.
+     * A rate of 0 means the token is supported but currently has no fee.
      * @param token The address of the token for which to set the fee rate.
      * @param rate The new fee rate as a UD60x18 value.
      */
     function setFeeRate(address token, UD60x18 rate) external onlyOwner {
+        // Prevent setting fee for zero address
+        require(
+            token != address(0),
+            "FeeCalculator: Token cannot be zero address"
+        );
         require(rate.lte(ud(1e18)), "Fee rate cannot exceed 100%");
+
         feeRates[token] = rate;
+        supportedTokens[token] = true; // Automatically mark as supported when setting a rate
+
         emit FeeRateSet(token, rate);
+        emit TokenSupportToggled(token, true);
+    }
+
+    /**
+     * @notice Removes support for a token and sets its fee rate to zero.
+     * No fees will be calculated for this token thereafter.
+     * @param token The address of the token to remove support for.
+     */
+    function removeTokenSupport(address token) external onlyOwner {
+        require(
+            token != address(0),
+            "FeeCalculator: Token cannot be zero address"
+        );
+        require(
+            supportedTokens[token],
+            "FeeCalculator: Token not currently supported"
+        ); // Only remove if it was supported
+
+        feeRates[token] = ud(0); // Explicitly set rate to zero
+        supportedTokens[token] = false; // Mark as not supported
+
+        emit FeeRateSet(token, ud(0));
+        emit TokenSupportToggled(token, false);
     }
 
     /**
      * @notice Calculates the fee for a given amount of a specific token.
+     * @dev Will revert if the token is not explicitly marked as supported.
      * @param token The address of the token.
      * @param amount The amount of the token for which to calculate the fee.
      * @return The calculated fee amount.
      */
-    function getFee(address token, uint256 amount) external view returns (uint256) {
+    function getFee(
+        address token,
+        uint256 amount
+    ) external view returns (uint256) {
+        require(
+            token != address(0),
+            "FeeCalculator: Token cannot be zero address"
+        ); // Prevent getting fee for zero address
+        require(
+            supportedTokens[token],
+            "FeeCalculator: Token not supported for fee calculation"
+        ); // Only calculate fee for supported tokens
+
         UD60x18 rate = feeRates[token];
+
+        // If the token is supported but has a fee rate of 0, return 0.
+        // This allows us to differentiate between supported and unsupported tokens.
         if (rate.isZero()) {
             return 0;
         }
