@@ -7,15 +7,18 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
 import {MutatedOptionPairV2} from "../contracts/MutatedOptionPairV2.sol";
 import {TestToken} from "../contracts/TestToken.sol";
+import {FeeCalculator} from "../contracts/FeeCalculator.sol";
 
 contract MutatedOptionPairV2Test is Test {
     MutatedOptionPairV2 internal optionPair;
     TestToken internal underlyingToken;
     TestToken internal strikeToken;
+    FeeCalculator internal feeCalculator;
 
     address internal seller = address(0x1);
     address internal buyer = address(0x2);
     address internal deployer = address(this); // The test contract itself is the deployer
+    address public feeRecipient;
 
     uint256 internal constant INITIAL_SUPPLY = 1_000_000e18;
     uint256 internal constant UNDERLYING_AMOUNT = 1e18;
@@ -24,6 +27,8 @@ contract MutatedOptionPairV2Test is Test {
     uint256 internal constant PERIOD_IN_SECONDS = 3600; // 1 hour
 
     function setUp() public {
+        feeRecipient = makeAddr("feeRecipient");
+
         underlyingToken = new TestToken(
             "Underlying Token",
             "ULT",
@@ -32,9 +37,11 @@ contract MutatedOptionPairV2Test is Test {
         );
         strikeToken = new TestToken("Strike Token", "STK", INITIAL_SUPPLY, 18);
 
+        feeCalculator = new FeeCalculator(deployer, feeRecipient);
         optionPair = new MutatedOptionPairV2(
             address(underlyingToken),
-            address(strikeToken)
+            address(strikeToken),
+            address(feeCalculator)
         );
 
         // Mint tokens for seller and buyer from the deployer's balance

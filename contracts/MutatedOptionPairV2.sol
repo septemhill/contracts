@@ -19,6 +19,7 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
 
     address public immutable underlyingToken;
     address public immutable strikeToken;
+    address public immutable feeCalculator;
 
     // Enum to define the type of an order
     enum OrderType {
@@ -109,9 +110,14 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
 
     // --- Constructor ---
 
-    constructor(address _underlyingToken, address _strikeToken) {
+    constructor(
+        address _underlyingToken,
+        address _strikeToken,
+        address _feeCalculator
+    ) {
         underlyingToken = _underlyingToken;
         strikeToken = _strikeToken;
+        feeCalculator = _feeCalculator;
         nextOptionId = 1;
     }
 
@@ -130,7 +136,10 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         require(_underlyingAmount > 0, "Ask: Underlying amount must be > 0");
         require(_strikeAmount > 0, "Ask: Strike amount must be > 0");
         require(_premiumAmount > 0, "Ask: Premium amount must be > 0");
-        require(_periodInSeconds >= 3600, "Ask: Period must be at least 1 hour (3600 seconds)");
+        require(
+            _periodInSeconds >= 3600,
+            "Ask: Period must be at least 1 hour (3600 seconds)"
+        );
 
         // Seller locks the underlying asset
         IERC20(underlyingToken).safeTransferFrom(
@@ -181,7 +190,10 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         require(_underlyingAmount > 0, "Bid: Underlying amount must be > 0");
         require(_strikeAmount > 0, "Bid: Strike amount must be > 0");
         require(_premiumAmount > 0, "Bid: Premium amount must be > 0");
-        require(_periodInSeconds >= 3600, "Bid: Period must be at least 1 hour (3600 seconds)");
+        require(
+            _periodInSeconds >= 3600,
+            "Bid: Period must be at least 1 hour (3600 seconds)"
+        );
 
         // Buyer locks the premium
         IERC20(strikeToken).safeTransferFrom(

@@ -3,9 +3,16 @@ pragma solidity ^0.8.20;
 
 import "./MutatedOptionPairV2.sol";
 
+import "./FeeCalculator.sol";
+
 contract MutatedOptionFactoryV2 {
+    address public feeCalculator;
     address[] public allOptionPairs;
     mapping(bytes32 => address) public getPairBySalt;
+
+    constructor(address _feeCalculator) {
+        feeCalculator = _feeCalculator;
+    }
 
     event OptionPairCreated(
         address indexed underlyingToken,
@@ -30,15 +37,24 @@ contract MutatedOptionFactoryV2 {
     ) public view returns (address) {
         bytes memory bytecode = abi.encodePacked(
             type(MutatedOptionPairV2).creationCode,
-            abi.encode(_underlyingToken, _strikeToken)
+            abi.encode(_underlyingToken, _strikeToken, feeCalculator)
         );
-        
-        return address(uint160(uint256(keccak256(abi.encodePacked(
-            bytes1(0xff),
-            address(this),
-            _salt,
-            keccak256(bytecode)
-        )))));
+
+        return
+            address(
+                uint160(
+                    uint256(
+                        keccak256(
+                            abi.encodePacked(
+                                bytes1(0xff),
+                                address(this),
+                                _salt,
+                                keccak256(bytecode)
+                            )
+                        )
+                    )
+                )
+            );
     }
 
     /**
@@ -70,10 +86,9 @@ contract MutatedOptionFactoryV2 {
             "Factory: Salt has been used"
         );
 
-        MutatedOptionPairV2 newOptionPair = new MutatedOptionPairV2{salt: _salt}(
-            _underlyingToken,
-            _strikeToken
-        );
+        MutatedOptionPairV2 newOptionPair = new MutatedOptionPairV2{
+            salt: _salt
+        }(_underlyingToken, _strikeToken, feeCalculator);
 
         address pairAddress = address(newOptionPair);
         allOptionPairs.push(pairAddress);
@@ -86,7 +101,7 @@ contract MutatedOptionFactoryV2 {
             _salt,
             allOptionPairs.length
         );
-        
+
         return pairAddress;
     }
 
