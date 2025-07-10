@@ -442,6 +442,14 @@ contract MutatedOptionPairV2 is ReentrancyGuard {
         );
 
         uint256 closingFee = calculateClosingFeeAmount(_optionId);
+
+        // The `require(closingFee > 0, ...)` check below is a defensive programming measure.
+        // According to the logic of `calculateClosingFeeAmount`, `closingFee` can only be zero
+        // when the option has no remaining time (i.e., it has expired).
+        // However, the `require(block.timestamp < option.expirationTimestamp, "Option: Already expired")`
+        // check at the beginning of this function already prevents expired options from executing this function.
+        // Therefore, under the current logic, by the time this line is reached, `closingFee` must be greater than 0,
+        // and this require check will never be triggered.
         require(closingFee > 0, "Option: Calculated closing fee must be > 0");
 
         option.state = OptionState.Closed;

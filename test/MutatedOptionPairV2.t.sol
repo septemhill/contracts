@@ -958,4 +958,78 @@ contract MutatedOptionPairV2Test is Test {
         optionPair.fillBid(bidOptionId);
         vm.stopPrank();
     }
+
+    // The test doesn't actually happen, see the comment in `closeOption` for more details
+    // function test_CloseOption_RevertsWhenClosingFeeIsZero() public {
+    //     uint256 optionId = _createAndFillAsk();
+
+    //     // Warp to the exact expiration time, making the closing fee zero
+    //     MutatedOptionPairV2.Option memory option = optionPair.getOption(
+    //         optionId
+    //     );
+    //     vm.warp(option.expirationTimestamp);
+
+    //     uint256 closingFee = optionPair.calculateClosingFeeAmount(optionId);
+    //     assertEq(closingFee, 0, "Closing fee should be zero at expiration");
+
+    //     vm.startPrank(seller);
+    //     vm.expectRevert("Option: Calculated closing fee must be > 0");
+    //     optionPair.closeOption(optionId);
+    //     vm.stopPrank();
+    // }
+
+    function test_GetClosingFeePercentage_ReturnsZeroForExpiredOption() public {
+        uint256 optionId = _createAndFillAsk();
+
+        // Warp to just after the expiration time
+        MutatedOptionPairV2.Option memory option = optionPair.getOption(
+            optionId
+        );
+        vm.warp(option.expirationTimestamp + 1);
+
+        // The option is now expired, but still "Active" until claimed
+        UD60x18 feePercentage = optionPair.getClosingFeePercentage(optionId);
+        assertEq(
+            feePercentage.intoUint256(),
+            0,
+            "Fee percentage should be 0 for an expired option"
+        );
+    }
+
+    function test_Coverage_FillAsk_RevertsIfNotOpen() public {
+        uint256 optionId = _createAndFillAsk(); // This makes the option Active
+
+        vm.startPrank(buyer);
+        vm.expectRevert("Order: Not open");
+        optionPair.fillAsk(optionId);
+        vm.stopPrank();
+    }
+
+    function test_Coverage_FillBid_RevertsIfNotOpen() public {
+        // Create and fill an ask, which is not a bid
+        uint256 optionId = _createAndFillAsk();
+
+        vm.startPrank(seller);
+        vm.expectRevert("Order: Not open");
+        optionPair.fillBid(optionId);
+        vm.stopPrank();
+    }
+
+    function test_Coverage_ExerciseOption_RevertsIfNotActive() public {
+        // Create an ask, but don't fill it. State is Open.
+        vm.startPrank(seller);
+        optionPair.createAsk(
+            UNDERLYING_AMOUNT,
+            STRIKE_AMOUNT,
+            PREMIUM_AMOUNT,
+            PERIOD_IN_SECONDS
+        );
+        vm.stopPrank();
+        uint256 optionId = 1;
+
+        vm.startPrank(buyer);
+        vm.expectRevert("Option: Not active");
+        optionPair.exerciseOption(optionId);
+        vm.stopPrank();
+    }
 }
